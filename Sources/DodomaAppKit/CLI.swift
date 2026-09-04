@@ -16,6 +16,7 @@ public enum CLI {
         case set(key: String?, value: String?)
         case policy(bundleID: String?, mode: String?)
         case skipVerify(bundleID: String?, state: String?)
+        case unknown(argument: String)
         case words(action: String?, word: String?, language: String?)
         case help
     }
@@ -158,6 +159,21 @@ public enum CLI {
                 continue
             }
         }
+
+        // Nothing matched. Returning nil here means "no command", and the
+        // caller's answer to no command is to start the menu-bar application —
+        // so a mistyped flag launched a second copy of the app, in the
+        // foreground, which never exits. Two instances means two event taps
+        // both capturing and both able to inject.
+        //
+        // Only long options are treated as a typo. macOS hands a bundled
+        // application single-dash arguments of its own — -psn_0_… from
+        // LaunchServices, -NSDocumentRevisionsDebugMode and friends — and
+        // refusing to start because of one would be a worse bug than the one
+        // this fixes.
+        if let mistyped = arguments.first(where: { $0.hasPrefix("--") }) {
+            return .unknown(argument: mistyped)
+        }
         return nil
     }
 
@@ -199,6 +215,8 @@ public enum CLI {
             return CLIConfig.policy(bundleID, mode, store: SettingsStore())
         case .skipVerify(let bundleID, let state):
             return CLIConfig.skipVerify(bundleID, state, store: SettingsStore())
+        case .unknown(let argument):
+            return fail("unknown option '\(argument)'. Run harf --help for the full list.", code: 2)
         case .words(let action, let word, let language):
             return CLIConfig.words(action, word, language: language, lexicon: sharedLexicon())
         case .help:
