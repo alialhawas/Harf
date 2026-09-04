@@ -50,7 +50,20 @@ sign: bundle
 	esac; \
 	if security find-identity -v -p codesigning | grep -q "$$IDENTITY"; then \
 		echo "Signing with identity '$$IDENTITY'"; \
-		codesign --force --options runtime $$STAMP --sign "$$IDENTITY" $(APP_BUNDLE); \
+		if ! codesign --force --options runtime $$STAMP --sign "$$IDENTITY" $(APP_BUNDLE); then \
+			echo ""; \
+			echo "Signing failed. The usual cause is a locked keychain: codesign can"; \
+			echo "list the identity without being able to use its private key, and"; \
+			echo "reports errSecInternalComponent rather than saying so."; \
+			echo ""; \
+			echo "Find which keychain holds it, and unlock that one:"; \
+			for k in $$HOME/Library/Keychains/*.keychain-db; do \
+				if security find-certificate -c "$$IDENTITY" "$$k" >/dev/null 2>&1; then \
+					echo "    security unlock-keychain $$k"; \
+				fi; \
+			done; \
+			exit 1; \
+		fi; \
 	else \
 		echo "############################################################"; \
 		echo "WARNING: code-signing identity '$$IDENTITY' not found."; \

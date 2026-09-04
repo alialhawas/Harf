@@ -14,6 +14,37 @@ KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
 # trust prompt leaves an untrusted certificate behind; without this check a
 # re-run would add a second "Dodoma Dev" and codesign would then refuse to sign
 # because the identity is ambiguous.
+# Every keychain, not just the login one. An identity created by an earlier
+# version of this script may live in a keychain of its own; a guard that looks
+# only at the login keychain would not see it, would create a second "Dodoma
+# Dev", and codesign would then refuse to sign at all because the identity is
+# ambiguous.
+EXISTING=""
+for candidate in "$HOME"/Library/Keychains/*.keychain-db; do
+    if security find-certificate -c "$IDENTITY" "$candidate" >/dev/null 2>&1; then
+        EXISTING="$candidate"
+        break
+    fi
+done
+
+if [ -n "$EXISTING" ]; then
+    if [ "$EXISTING" != "$KEYCHAIN" ]; then
+        echo "'$IDENTITY' already exists, in a keychain of its own:"
+        echo "    $EXISTING"
+        echo
+        echo "That is where an earlier version of this script put it. Nothing needs to"
+        echo "be created. If signing fails with errSecInternalComponent, that keychain"
+        echo "is locked rather than missing:"
+        echo "    security unlock-keychain $EXISTING"
+        echo
+        echo "To start over instead, delete it first — note that a new certificate is a"
+        echo "new designated requirement, so macOS will ask for Accessibility and Input"
+        echo "Monitoring again, once:"
+        echo "    security delete-keychain $EXISTING"
+        exit 0
+    fi
+fi
+
 if security find-certificate -c "$IDENTITY" "$KEYCHAIN" >/dev/null 2>&1; then
     if security find-identity -v -p codesigning | grep -q "$IDENTITY"; then
         echo "Code-signing identity '$IDENTITY' already exists and is valid. Nothing to do."
