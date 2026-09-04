@@ -157,6 +157,40 @@ enum CLIConfig {
             + "buffer, idle, learn, debugLogging, defaultPolicy"
     }
 
+    // MARK: - Verify-before-delete skip list
+
+    /// The one setting the settings window could reach and the shell could
+    /// not, which made it the one setting `--status` could report but nobody
+    /// could act on.
+    static func skipVerify(_ bundleID: String?, _ state: String?, store: SettingsStore) -> Int32 {
+        guard let bundleID else {
+            let skip = store.settings.axVerifySkip
+            if skip.isEmpty {
+                print("no apps skip the verify-before-delete read")
+            } else {
+                for id in skip.sorted() { print(id) }
+            }
+            return 0
+        }
+        guard let state else {
+            print(store.settings.axVerifySkip.contains(bundleID) ? "on" : "off")
+            return 0
+        }
+        guard let on = boolean(state) else {
+            return CLI.fail("--skip-verify: expected on or off, not '\(state)'", code: 2)
+        }
+        let current = store.settings.axVerifySkip
+        store.setAXVerifySkip(on ? current.union([bundleID]) : current.subtracting([bundleID]))
+        print("\(bundleID) skip-verify = \(on ? "on" : "off")")
+        if on {
+            print("")
+            print("Rewrites in this app now go ahead without checking what is in front of")
+            print("the caret first. That is the check that stops a stale buffer deleting")
+            print("text it did not put there.")
+        }
+        return 0
+    }
+
     // MARK: - Per-app policy
 
     static func policy(_ bundleID: String?, _ mode: String?, store: SettingsStore) -> Int32 {

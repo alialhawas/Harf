@@ -15,6 +15,7 @@ public enum CLI {
         case config
         case set(key: String?, value: String?)
         case policy(bundleID: String?, mode: String?)
+        case skipVerify(bundleID: String?, state: String?)
         case words(action: String?, word: String?, language: String?)
         case help
     }
@@ -34,6 +35,9 @@ public enum CLI {
                                        your own vocabulary, kept in
                                        ~/Library/Application Support/Harf/lexicon.json
           --policy [BUNDLE_ID [MODE]]  list, read, or set an app's mode
+          --skip-verify [BUNDLE_ID [on|off]]
+                                       apps allowed to rewrite without checking
+                                       the caret first; see Per-app modes below
 
         Settings you can change            values                     default
           paused                           yes | no                   no
@@ -137,6 +141,9 @@ public enum CLI {
             case "--set":
                 return .set(key: next, value: arguments.indices.contains(index + 2)
                             ? arguments[index + 2] : nil)
+            case "--skip-verify":
+                return .skipVerify(bundleID: next, state: arguments.indices.contains(index + 2)
+                                   ? arguments[index + 2] : nil)
             case "--policy":
                 return .policy(bundleID: next, mode: arguments.indices.contains(index + 2)
                                ? arguments[index + 2] : nil)
@@ -190,6 +197,8 @@ public enum CLI {
             return CLIConfig.set(key, value, store: SettingsStore())
         case .policy(let bundleID, let mode):
             return CLIConfig.policy(bundleID, mode, store: SettingsStore())
+        case .skipVerify(let bundleID, let state):
+            return CLIConfig.skipVerify(bundleID, state, store: SettingsStore())
         case .words(let action, let word, let language):
             return CLIConfig.words(action, word, language: language, lexicon: sharedLexicon())
         case .help:

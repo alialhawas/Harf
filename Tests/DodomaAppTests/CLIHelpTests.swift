@@ -22,6 +22,17 @@ final class CLIHelpTests: XCTestCase {
         }
     }
 
+    /// Every command that writes a setting has to be discoverable from --help,
+    /// or it is a setting only the settings window can reach — which is what
+    /// the verify-skip list was until it was given a command.
+    func testHelpDocumentsEveryWritingCommand() {
+        for command in ["--set", "--policy", "--skip-verify", "--words"] {
+            XCTAssertTrue(
+                CLI.helpText.contains(command),
+                "\(command) changes a setting but --help never mentions it")
+        }
+    }
+
     func testHelpListsEverySensitivityLevel() {
         for level in Aggressiveness.allCases {
             XCTAssertTrue(
