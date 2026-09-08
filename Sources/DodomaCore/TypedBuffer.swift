@@ -49,14 +49,36 @@ public enum ResetReason: String, Equatable, Hashable, Sendable, CaseIterable {
 /// typing pipeline). It emits no notifications; the owner observes it directly.
 public final class TypedBuffer {
     /// Maximum retained keys. Appending past the cap drops from the head.
-    public static let capacity = 200
+    /// How many keystrokes the buffer will hold at once.
+    ///
+    /// This is the only number that says how much of your typing exists in
+    /// memory at any moment, so it is a privacy control before it is a
+    /// performance one. The default holds roughly a long sentence; lowering it
+    /// shortens the window in which anything is retained, at the cost of not
+    /// being able to reach back as far when a mistake started early in a line.
+    public static let defaultCapacity = 200
+    public static let minimumCapacity = 20
+    public static let maximumCapacity = 500
+
+    /// The limit this buffer is running with.
+    public private(set) var capacity: Int = defaultCapacity
+
+    /// Applies a new limit, trimming immediately rather than at the next
+    /// keystroke: lowering the setting has to take effect on what is already
+    /// held, or the control would be a promise about the future only.
+    public func setCapacity(_ requested: Int) {
+        capacity = min(max(requested, Self.minimumCapacity), Self.maximumCapacity)
+        if storage.count > capacity {
+            storage.removeFirst(storage.count - capacity)
+        }
+    }
 
     private var storage: [CapturedKey] = []
 
     public private(set) var lastResetReason: ResetReason?
 
     public init() {
-        storage.reserveCapacity(Self.capacity)
+        storage.reserveCapacity(Self.defaultCapacity)
     }
 
     public var keys: [CapturedKey] { storage }
@@ -74,8 +96,8 @@ public final class TypedBuffer {
 
     public func append(_ key: CapturedKey) {
         storage.append(key)
-        if storage.count > Self.capacity {
-            storage.removeFirst(storage.count - Self.capacity)
+        if storage.count > capacity {
+            storage.removeFirst(storage.count - capacity)
         }
     }
 

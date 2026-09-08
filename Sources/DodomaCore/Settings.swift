@@ -15,6 +15,26 @@ public struct AppSettings: Codable, Equatable, Sendable {
 
     public var schemaVersion: Int
     public var aggressiveness: Aggressiveness
+
+    /// Score at which a fix is applied however short the text is.
+    ///
+    /// nil leaves the length rules in charge, which is how the app behaved
+    /// before this existed: a single word was never rewritten silently no
+    /// matter how certain the reading.
+    public var confidentScore: Double?
+
+    /// Keystrokes held in memory at once. See `TypedBuffer.capacity`.
+    public var bufferCapacity: Int
+
+    /// Seconds of not typing after which the buffer is dropped.
+    public var idleTimeout: Double
+
+    /// Whether words are learned from what you write.
+    ///
+    /// Learning writes to disk. Everything else this app does lives in memory
+    /// and dies with the process, so this is the one switch that decides
+    /// whether anything you typed outlives the session.
+    public var learnVocabulary: Bool
     /// Per-app overrides, keyed by exact (case-sensitive) bundle identifier.
     public var appPolicies: [String: AppPolicy]
     /// What an app with no entry in `appPolicies` gets.
@@ -39,6 +59,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public init(
         schemaVersion: Int = AppSettings.currentSchemaVersion,
         aggressiveness: Aggressiveness = .balanced,
+        confidentScore: Double? = 0.90,
+        bufferCapacity: Int = TypedBuffer.defaultCapacity,
+        idleTimeout: Double = BufferResetPolicy.idleTimeout,
+        learnVocabulary: Bool = true,
         appPolicies: [String: AppPolicy] = PolicySeeds.table,
         defaultPolicy: AppPolicy = .normal,
         paused: Bool = false,
@@ -47,6 +71,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
     ) {
         self.schemaVersion = schemaVersion
         self.aggressiveness = aggressiveness
+        self.confidentScore = confidentScore
+        self.bufferCapacity = bufferCapacity
+        self.idleTimeout = idleTimeout
+        self.learnVocabulary = learnVocabulary
         self.appPolicies = appPolicies
         self.defaultPolicy = defaultPolicy
         self.paused = paused
@@ -132,7 +160,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
     // MARK: - Codable
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, aggressiveness, appPolicies, defaultPolicy, paused, debugLogging
+        case schemaVersion, aggressiveness, confidentScore, bufferCapacity, idleTimeout
+        case learnVocabulary, appPolicies, defaultPolicy, paused, debugLogging
         case axVerifySkip
     }
 
@@ -149,6 +178,13 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.init(
             schemaVersion: value(.schemaVersion, Self.currentSchemaVersion),
             aggressiveness: Aggressiveness(rawValue: value(.aggressiveness, "")) ?? .balanced,
+            // A blob written before this setting existed decodes as nil, which
+            // is the old behaviour, not the new default: an upgrade must not
+            // silently start rewriting single words on someone.
+            confidentScore: (try? container.decodeIfPresent(Double.self, forKey: .confidentScore)) ?? nil,
+            bufferCapacity: value(.bufferCapacity, TypedBuffer.defaultCapacity),
+            idleTimeout: value(.idleTimeout, BufferResetPolicy.idleTimeout),
+            learnVocabulary: value(.learnVocabulary, true),
             appPolicies: rawPolicies.compactMapValues(AppPolicy.init(rawValue:)),
             defaultPolicy: AppPolicy(rawValue: value(.defaultPolicy, "")) ?? .normal,
             paused: value(.paused, false),

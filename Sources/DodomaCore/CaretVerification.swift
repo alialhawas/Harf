@@ -66,6 +66,12 @@ public enum CaretVerification {
         case downgrade(reason: String)
     }
 
+    /// How much agreeing text an app must produce for a short answer to count.
+    ///
+    /// One or two matching characters is a coincidence — plenty of lines end in
+    /// the same letter. Four is enough to be about this rewrite and not another.
+    public static let minimumPartialMatch = 4
+
     /// - Parameters:
     ///   - read: what the accessibility layer had to say at the caret.
     ///   - replacedText: `Fix.replacedText`, i.e. exactly what the delete burst
@@ -89,10 +95,33 @@ public enum CaretVerification {
         switch read {
         case .value(let axText):
             let actual = Array(axText.utf16)
-            guard actual.count >= expected.count else {
-                return .downgrade(reason: "caret text is shorter than the typed text")
+
+            if actual.count >= expected.count {
+                guard Array(actual.suffix(expected.count)) == expected else {
+                    return .downgrade(reason: "caret text does not end with the typed text")
+                }
+                return .proceed
             }
-            guard Array(actual.suffix(expected.count)) == expected else {
+
+            // The app answered with less text than the fix would remove.
+            //
+            // That used to end it, which quietly disqualified a whole class of
+            // application: a terminal exposes only what is on the current line
+            // or in the visible cells, so it reports a few characters no matter
+            // how much was typed, and every rewrite there was refused. The user
+            // was left adding apps to a skip list by hand — trading the check
+            // away completely for the apps that needed it most.
+            //
+            // A short answer is not a contradiction. If what the app *did*
+            // report matches the tail of what was typed, the two agree as far
+            // as the app can see, and the characters beyond its horizon are
+            // vouched for by the same buffer that produced the match. What must
+            // not pass is a short answer that disagrees, or one so short it
+            // says nothing at all.
+            guard actual.count >= minimumPartialMatch else {
+                return .downgrade(reason: "caret text is too short to confirm anything")
+            }
+            guard Array(expected.suffix(actual.count)) == actual else {
                 return .downgrade(reason: "caret text does not end with the typed text")
             }
             return .proceed

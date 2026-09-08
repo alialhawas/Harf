@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-pkill -x Dodoma || true
-rm -rf /Applications/Dodoma.app
+pkill -x Harf || true
+rm -rf /Applications/Harf.app
 tccutil reset Accessibility com.ali.dodoma || true
 tccutil reset ListenEvent com.ali.dodoma || true
 

@@ -57,7 +57,7 @@ final class HotkeyCenter {
             &handler)
         guard status == noErr else {
             Log.app.error(
-                "hot key handler could not be installed (\(status, privacy: .public)); ⌘⌥Z and ⌘⌥P will not work"
+                "hot key handler could not be installed (\(status, privacy: .public)); ⌘⌥Z, ⌘⌥P and ⌃⌘F will not work"
             )
             handler = nil
             return false

@@ -1,15 +1,15 @@
-APP_NAME := Dodoma
+APP_NAME := Harf
 BUNDLE_ID := com.ali.dodoma
 APP_BUNDLE := build/$(APP_NAME).app
 CONTENTS := $(APP_BUNDLE)/Contents
-SIGN_IDENTITY := Dodoma Dev
+SIGN_IDENTITY ?= Dodoma Dev
 
 FIXTURES := Tests/DodomaCoreTests/Fixtures/layout-tables.json
 CORPUS := Tests/DodomaCoreTests/Fixtures/corpus.tsv
 # SwiftPM resource bundle for the DodomaCore target: <package>_<target>.bundle
-RESOURCE_BUNDLE := Dodoma_DodomaCore.bundle
+RESOURCE_BUNDLE := Harf_DodomaCore.bundle
 
-.PHONY: build bundle sign install run test fixtures logs ngrams eval clean
+.PHONY: dmg build bundle sign install run test fixtures logs ngrams eval clean
 
 build:
 	swift build -c release
@@ -30,21 +30,51 @@ bundle: build
 	cp -R "$$BIN/$(RESOURCE_BUNDLE)" $(CONTENTS)/Resources/
 	@echo "Bundled $(APP_BUNDLE)"
 
+# The hardened runtime is on for every build, not just released ones: Apple
+# refuses to notarise without it, and a local build that behaves differently
+# from the one users install is not worth the debugging. It costs nothing here
+# — Accessibility and Input Monitoring are TCC grants, not entitlements, so the
+# app needs no exceptions and ships with no entitlements file.
+#
+# A secure timestamp is also required for notarisation, but it needs Apple's
+# timestamp server. Only Developer ID builds pay that network cost; self-signed
+# local builds stay offline-capable.
+#
+# --deep is deliberately absent: the bundle holds one Mach-O and no nested
+# code, and Apple documents --deep as unsuitable for distribution signing.
 sign: bundle
-	@if security find-identity -v -p codesigning | grep -q "$(SIGN_IDENTITY)"; then \
-		echo "Signing with identity '$(SIGN_IDENTITY)'"; \
-		codesign --force --deep --sign "$(SIGN_IDENTITY)" $(APP_BUNDLE); \
+	@IDENTITY="$(SIGN_IDENTITY)"; \
+	case "$$IDENTITY" in \
+		"Developer ID"*) STAMP="--timestamp" ;; \
+		*)               STAMP="--timestamp=none" ;; \
+	esac; \
+	if security find-identity -v -p codesigning | grep -q "$$IDENTITY"; then \
+		echo "Signing with identity '$$IDENTITY'"; \
+		if ! codesign --force --options runtime $$STAMP --sign "$$IDENTITY" $(APP_BUNDLE); then \
+			echo ""; \
+			echo "Signing failed. The usual cause is a locked keychain: codesign can"; \
+			echo "list the identity without being able to use its private key, and"; \
+			echo "reports errSecInternalComponent rather than saying so."; \
+			echo ""; \
+			echo "Find which keychain holds it, and unlock that one:"; \
+			for k in $$HOME/Library/Keychains/*.keychain-db; do \
+				if security find-certificate -c "$$IDENTITY" "$$k" >/dev/null 2>&1; then \
+					echo "    security unlock-keychain $$k"; \
+				fi; \
+			done; \
+			exit 1; \
+		fi; \
 	else \
 		echo "############################################################"; \
-		echo "WARNING: code-signing identity '$(SIGN_IDENTITY)' not found."; \
+		echo "WARNING: code-signing identity '$$IDENTITY' not found."; \
 		echo "Falling back to ad-hoc signing."; \
 		echo "Ad-hoc signatures change on every rebuild, so macOS treats"; \
 		echo "each build as a different app and DROPS the Accessibility"; \
 		echo "and Input Monitoring grants. You will have to re-approve"; \
-		echo "Dodoma after every build."; \
+		echo "Harf after every build."; \
 		echo "Fix this once by running: scripts/make-cert.sh"; \
 		echo "############################################################"; \
-		codesign --force --deep --sign - $(APP_BUNDLE); \
+		codesign --force --options runtime --timestamp=none --sign - $(APP_BUNDLE); \
 	fi
 	codesign -dr - $(APP_BUNDLE)
 
@@ -63,10 +93,10 @@ test:
 # Snapshots this machine's ABC and Arabic uchr tables so renderer tests stay
 # deterministic regardless of which input sources are enabled where they run.
 fixtures:
-	swift run Dodoma --dump-layout-fixtures $(FIXTURES)
+	swift run Harf --dump-layout-fixtures $(FIXTURES)
 
 eval:
-	swift run Dodoma --eval $(CORPUS)
+	swift run Harf --eval $(CORPUS)
 
 # --debug --info: the decision and pipeline categories log at those levels, and
 # `log stream` shows neither by default.
@@ -80,3 +110,6 @@ ngrams:
 
 clean:
 	rm -rf .build build
+
+dmg: build bundle sign ## Build a distributable disk image
+	./scripts/make-dmg.sh

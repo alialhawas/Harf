@@ -70,17 +70,36 @@ final class BufferTests: XCTestCase {
 
     func testOverflowDropsFromTheHeadAtCapacity() {
         let buffer = TypedBuffer()
-        for index in 0..<(TypedBuffer.capacity + 5) {
+        for index in 0..<(TypedBuffer.defaultCapacity + 5) {
             buffer.append(CapturedKey(keycode: UInt16(index % 100), producedText: "x"))
         }
 
-        XCTAssertEqual(buffer.count, TypedBuffer.capacity)
-        XCTAssertEqual(buffer.currentText.count, TypedBuffer.capacity)
+        XCTAssertEqual(buffer.count, TypedBuffer.defaultCapacity)
+        XCTAssertEqual(buffer.currentText.count, TypedBuffer.defaultCapacity)
         XCTAssertEqual(buffer.keys.first?.keycode, 5)
     }
 
     func testCapacityIsTwoHundred() {
-        XCTAssertEqual(TypedBuffer.capacity, 200)
+        XCTAssertEqual(TypedBuffer.defaultCapacity, 200)
+    }
+
+    /// Lowering the limit has to act on what is already held. A control that
+    /// only governed future keystrokes would not be a privacy control.
+    func testLoweringTheCapacityTrimsWhatIsAlreadyHeld() {
+        let buffer = TypedBuffer()
+        for index in 0..<120 { buffer.append(key("x", keycode: UInt16(index % 100))) }
+        buffer.setCapacity(30)
+        XCTAssertEqual(buffer.keys.count, 30)
+        XCTAssertEqual(buffer.keys.last?.keycode, UInt16(119 % 100), "the newest keys survive")
+    }
+
+    /// The limit is clamped, so a bad value cannot disable the ring.
+    func testCapacityIsClamped() {
+        let buffer = TypedBuffer()
+        buffer.setCapacity(1)
+        XCTAssertEqual(buffer.capacity, TypedBuffer.minimumCapacity)
+        buffer.setCapacity(10_000)
+        XCTAssertEqual(buffer.capacity, TypedBuffer.maximumCapacity)
     }
 
     func testResetClearsAndRecordsReason() {

@@ -164,6 +164,32 @@ which must become `اذ ودك انا اسويها اليوم`.
 | 89 | Menu → **Quit Dodoma** (T2.15) | No hang, and `make logs` shows `event tap stopped`. This is the only end-to-end check of the event-tap teardown path | |
 | 90 | `scripts/uninstall.sh`, then reinstall | The app is gone and both grants are reset; reinstalling does not need another `make-cert.sh` run | |
 
+## I. Flip on demand — ⌃⌘F
+
+Preconditions for every row: both input sources enabled, both grants in place,
+`make logs` running, and before each selection row put a known string on the
+clipboard with `echo canary | pbcopy` so the pasteboard round trip can be checked
+with `pbpaste`.
+
+| # | Do | Expect | ★ |
+| --- | --- | --- | --- |
+| 91 | **TextEdit.** Type `hgsghl `, select it, ⌃⌘F | The selection becomes `السلام ` with no visible backspacing, the input source switches to Arabic, the menu flashes `⇄` and gains a **Last fix** line. `pbpaste` still prints `canary` (Accessibility path: nothing was copied) | ★ |
+| 92 | ⌘⌥Z immediately after row 91 | `hgsghl ` is back, the layout is ABC again, the **Last fix** line reads `(undone)` | ★ |
+| 93 | TextEdit: type `hgsghl ` and press ⌃⌘F with **nothing selected** | Flipped via backspaces; `make logs` shows `flipping the typed run` and a positive caret verification | ★ |
+| 94 | ⌃⌘F in an empty TextEdit document with nothing selected | Nothing at all: no ✕, no card, no log fault | ★ |
+| 95 | Row 91, then click **Learn** | `harf --words list --lang ar` gains the Arabic words; the card goes. Repeat with `pr link` typed on the Arabic layout: `harf --words list --lang en` shows `pr` and `link` | |
+| 96 | Row 91, then click **Not**, then ⌘⌥Z | The card goes, the lexicon is unchanged, **and the undo still works** — the click on the card did not count as input | ★ |
+| 97 | Row 91, leave the card alone | It fades after about six seconds; nothing is learned | |
+| 98 | **Slack.** Select wrong-layout text in the message box, ⌃⌘F | Replaced in place; `pbpaste` still prints `canary` | ★ |
+| 99 | **Conductor** (WebView, in the verify-skip list). Select wrong-layout text, ⌃⌘F; then type a run and press ⌃⌘F with nothing selected | The selection flips. The no-selection press is refused with a ✕: the caret cannot be verified there | |
+| 100 | **Ghostty** (no accessibility tree). Select text on the prompt line, ⌃⌘F | The selection is replaced (clipboard path: `make logs` shows the copy). `pbpaste` prints `canary` afterwards. The card appears, anchored to the pointer | ★ |
+| 101 | Ghostty with nothing selected and an empty Harf buffer, ⌃⌘F | Nothing is typed into the shell, no stray `c` reaches the prompt, and `pbpaste` is untouched | ★ |
+| 102 | Safari, focus a password field, ⌃⌘F | ✕. `make logs` shows the flip dropped **before** any copy; `pbpaste` is untouched | ★ |
+| 103 | ⌘⌥P (pause), then ⌃⌘F | ✕, nothing copied | |
+| 104 | Set an app to **Off**, ⌃⌘F there; set it to **Suggest only**, ⌃⌘F again | Off → ✕. Suggest only → the flip goes through | |
+| 105 | Press ⌃⌘F and **keep the chord held for two seconds** | The flip lands once the keys come up rather than refusing | ★ |
+| 106 | ⌘A a long TextEdit document, ⌃⌘F | ✕ and the document is untouched (the length cap) | ★ |
+
 ---
 
 ## Superseded rows, and why

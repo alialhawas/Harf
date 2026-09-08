@@ -159,6 +159,7 @@ public enum EvalHarness {
         rows: [EvalRow],
         detector: Detector,
         aggressiveness: Aggressiveness = .balanced,
+        confidentScore: Double? = nil,
         keyboardType: UInt32? = nil
     ) -> EvalReport {
         EvalReport(outcomes: rows.map { evaluate($0, detector: detector,

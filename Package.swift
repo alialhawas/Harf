@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "Dodoma",
+    name: "Harf",
     platforms: [
         .macOS(.v14)
     ],
@@ -23,7 +23,7 @@ let package = Package(
         ),
         // Nothing but the entry point.
         .executableTarget(
-            name: "Dodoma",
+            name: "Harf",
             dependencies: ["DodomaAppKit"],
             path: "Sources/DodomaApp"
         ),

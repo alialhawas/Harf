@@ -42,6 +42,7 @@ SOURCES = {
 }
 
 WORDLIST_LIMIT = 40_000
+DIALECT_FILE = REPO_ROOT / "Tools" / "data" / "ar.dialect.txt"
 SMOOTHING_K = 0.5
 # Two-letter entries beyond this rank are dropped; see prune_short_noise.
 SHORT_WORD_RANK_LIMIT = 5_000
@@ -117,6 +118,40 @@ def normalise_arabic(word: str) -> str | None:
     if any(character not in AR_LETTERS for character in normalised):
         return None
     return normalised
+
+
+def add_supplement(
+    counts: dict[str, int], path: Path, normalise
+) -> dict[str, int]:
+    """Merge a hand-curated word list into a frequency table.
+
+    Injected at the median frequency of what is already there rather than at
+    the top. These words have to survive `top_words`, but claiming they are as
+    common as the most frequent words in the language would distort the bigram
+    table that is built from the same counts.
+
+    A word already present keeps its measured count: the supplement is there to
+    add what the corpus lacks, not to re-weight what it has.
+    """
+    if not path.exists():
+        return counts
+    ranked = sorted(counts.values())
+    median = ranked[len(ranked) // 2] if ranked else 1
+    added = 0
+    for line in path.read_text(encoding="utf-8").splitlines():
+        word = line.split("#", 1)[0].strip()
+        if not word:
+            continue
+        normalised = normalise(word)
+        if normalised is None:
+            print(f"warning: {path.name}: skipping unusable entry {word!r}", file=sys.stderr)
+            continue
+        if normalised in counts:
+            continue
+        counts[normalised] = median
+        added += 1
+    print(f"supplement {path.relative_to(REPO_ROOT)} added {added} words")
+    return counts
 
 
 def load_frequencies(path: Path, normalise) -> dict[str, int]:
@@ -281,6 +316,8 @@ def main() -> int:
         source = fetch(language, url, arguments.force)
         normalise = normalise_english if language == "en" else normalise_arabic
         counts = prune_short_noise(load_frequencies(source, normalise))
+        if language == "ar":
+            counts = add_supplement(counts, DIALECT_FILE, normalise)
         if not counts:
             print(f"error: {source} produced no usable words", file=sys.stderr)
             return 1

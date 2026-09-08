@@ -81,6 +81,12 @@ final class SettingsStore {
 
     var aggressiveness: Aggressiveness { settings.aggressiveness }
 
+    var confidentScore: Double? { settings.confidentScore }
+
+    var bufferCapacity: Int { settings.bufferCapacity }
+    var idleTimeout: Double { settings.idleTimeout }
+    var learnVocabulary: Bool { settings.learnVocabulary }
+
     var paused: Bool { settings.paused }
 
     /// The blob's value, or the bare key, whichever is on.
@@ -94,6 +100,27 @@ final class SettingsStore {
 
     func setPaused(_ paused: Bool) {
         mutate { $0.paused = paused }
+    }
+
+    /// nil turns the confidence rule off and returns the length rules to
+    /// charge; any value is clamped into the range the slider can reach.
+    func setBufferCapacity(_ keys: Int) {
+        mutate {
+            $0.bufferCapacity = min(
+                max(keys, TypedBuffer.minimumCapacity), TypedBuffer.maximumCapacity)
+        }
+    }
+
+    func setIdleTimeout(_ seconds: Double) {
+        mutate { $0.idleTimeout = min(max(seconds, 2), 120) }
+    }
+
+    func setLearnVocabulary(_ enabled: Bool) {
+        mutate { $0.learnVocabulary = enabled }
+    }
+
+    func setConfidentScore(_ score: Double?) {
+        mutate { $0.confidentScore = score.map { min(max($0, 0.60), 0.99) } }
     }
 
     func setPolicy(_ policy: AppPolicy, for bundleID: String) {

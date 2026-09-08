@@ -1,0 +1,43 @@
+# Text that must never be rewritten, whatever the sensitivity is set to.
+# Real prose in both languages, bilingual lines, and things that are not prose
+# at all. Run with --confident at the lowest setting the UI offers.
+مرحبا كيف حالك اليوم يا صديقي	ignore
+السلام عليكم ورحمة الله وبركاته	ignore
+اريد ان اذهب الى السوق غدا صباحا	ignore
+هذا التقرير جاهز للمراجعة من فضلك	ignore
+شكرا جزيلا على مساعدتك في هذا الموضوع	ignore
+الاجتماع سوف يبدا الساعة الثالثة عصرا	ignore
+لم استطع الوصول الى الخادم هذا الصباح	ignore
+ارسلت لك الملف على البريد الالكتروني	ignore
+نحتاج الى مراجعة الكود قبل النشر	ignore
+هل يمكنك ان تشرح لي هذه النقطة مرة اخرى	ignore
+نعم	ignore
+لا	ignore
+شكرا	ignore
+تمام	ignore
+كيف	ignore
+الملف	ignore
+please review the pull request when you get a chance	ignore
+the deployment finished without any errors	ignore
+can we move the meeting to tomorrow afternoon	ignore
+i think this approach is much cleaner than before	ignore
+let me know if you need anything else from me	ignore
+the database migration is still running on staging	ignore
+we should probably add tests for that edge case	ignore
+the client reported an issue with call quality	ignore
+ok	ignore
+hi	ignore
+yes	ignore
+the	ignore
+git	ignore
+npm	ignore
+run	ignore
+log	ignore
+مرحبا hgsghl	ignore
+i said مرحبا to him yesterday	ignore
+git commit -m "fix the parser"	ignore
+https://github.com/alialhawas/Language-changer	ignore
+export API_KEY=abc123 && npm run build	ignore
+SELECT * FROM users WHERE id = 42	ignore
+~/.config/dodoma/settings.json	ignore
+v2.1.3 released on 2026-08-25	ignore

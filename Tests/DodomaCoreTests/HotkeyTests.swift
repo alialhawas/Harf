@@ -20,6 +20,10 @@ final class HotkeyTests: XCTestCase {
         XCTAssertEqual(Hotkeys.togglePause.keycode, 35, "kVK_ANSI_P")
         XCTAssertEqual(Hotkeys.togglePause.keycode, UInt16(kVK_ANSI_P))
         XCTAssertEqual(Hotkeys.togglePause.modifiers, [.command, .option])
+
+        XCTAssertEqual(Hotkeys.flipSelection.keycode, 3, "kVK_ANSI_F")
+        XCTAssertEqual(Hotkeys.flipSelection.keycode, UInt16(kVK_ANSI_F))
+        XCTAssertEqual(Hotkeys.flipSelection.modifiers, [.control, .command])
     }
 
     func testEveryActionHasExactlyOneBinding() {
@@ -39,6 +43,7 @@ final class HotkeyTests: XCTestCase {
     func testCarbonModifiers() {
         XCTAssertEqual(Hotkeys.undoLastFix.carbonModifiers, UInt32(cmdKey | optionKey))
         XCTAssertEqual(Hotkeys.togglePause.carbonModifiers, UInt32(cmdKey | optionKey))
+        XCTAssertEqual(Hotkeys.flipSelection.carbonModifiers, UInt32(cmdKey | controlKey))
     }
 
     func testEveryModifierIsTranslated() {
@@ -64,6 +69,8 @@ final class HotkeyTests: XCTestCase {
     func testTheChordIsRecognised() {
         XCTAssertEqual(Hotkeys.action(forKeycode: 6, flags: [.command, .option]), .undoLastFix)
         XCTAssertEqual(Hotkeys.action(forKeycode: 35, flags: [.command, .option]), .togglePause)
+        XCTAssertEqual(
+            Hotkeys.action(forKeycode: 3, flags: [.control, .command]), .flipSelection)
     }
 
     /// Typing Arabic through the English layout with Caps Lock on is how the
@@ -87,6 +94,9 @@ final class HotkeyTests: XCTestCase {
             (6, [.command, .option, .fn]),
             (7, [.command, .option]),
             (35, [.command, .shift]),
+            (3, [.command]),
+            (3, [.control]),
+            (3, [.control, .command, .shift]),
         ]
         for (keycode, flags) in misses {
             XCTAssertNil(

@@ -41,10 +41,56 @@ final class FakeFixEngine: FixApplying {
     /// pass every test in this file, which is exactly what happened once.
     var afterApply: ((Fix) -> Void)?
 
+    /// What the next `copySelection` reports back. Defaults to the answer an
+    /// application with nothing selected gives.
+    var copyResult: CopyResult = .noSelection
+
+    /// Run on the pipeline queue after the copy is notionally in flight and
+    /// before it is answered. The only way to reproduce a keystroke landing in
+    /// the middle of the ⌘C round trip, which for a real copy is the better
+    /// part of a second.
+    var beforeCopyAnswer: (() -> Void)?
+
+    /// What the next `replaceSelection` reports back. One inserted unit and
+    /// nothing deleted, which is the shape every successful selection flip has:
+    /// typing over a selection deletes nothing itself.
+    var replaceResult: Result<FixProgress, FixFailure> = .success(
+        FixProgress(deletedClusters: 0, insertedUTF16Units: 1))
+
+    /// Run after the completion handler, with the layout the flip selected.
+    /// The counterpart of `afterApply`, and there for the same reason: a
+    /// selection flip ends in `TISSelectInputSource` too, and the system
+    /// announces that back to the app as an input a few milliseconds later.
+    var afterReplace: ((String) -> Void)?
+
+    struct Replacement: Equatable {
+        let text: String
+        let targetLayoutID: String
+        let bundleID: String?
+        /// Whether the pipeline's abort predicate said the selection read had
+        /// gone stale by the time the engine asked.
+        let staleWhenAsked: Bool
+    }
+
+    private var replacements: [Replacement] = []
+    private var copies = 0
+
     var applied: [Call] {
         lock.lock()
         defer { lock.unlock() }
         return calls
+    }
+
+    var replaced: [Replacement] {
+        lock.lock()
+        defer { lock.unlock() }
+        return replacements
+    }
+
+    var copyCalls: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return copies
     }
 
     var lastFix: Fix? { applied.last?.fix }
@@ -65,6 +111,36 @@ final class FakeFixEngine: FixApplying {
         // one, which is the successful one.
         if case .success = result { afterApply?(fix) }
     }
+
+    func copySelection(in bundleID: String?, completion: @escaping (CopyResult) -> Void) {
+        lock.lock()
+        copies += 1
+        let result = copyResult
+        lock.unlock()
+        beforeCopyAnswer?()
+        completion(result)
+    }
+
+    func replaceSelection(
+        with text: String,
+        targetLayoutID: String,
+        in bundleID: String?,
+        isStale: @escaping () -> Bool,
+        completion: @escaping (Result<FixProgress, FixFailure>) -> Void
+    ) {
+        lock.lock()
+        replacements.append(
+            Replacement(
+                text: text, targetLayoutID: targetLayoutID, bundleID: bundleID,
+                staleWhenAsked: isStale()))
+        let result = self.replaceResult
+        lock.unlock()
+        duringApply?()
+        completion(result)
+        // Only a sequence that got as far as switching the layout announces
+        // one, which is the successful one.
+        if case .success = result { afterReplace?(targetLayoutID) }
+    }
 }
 
 /// The accessibility gate's answers, dictated.
@@ -73,11 +149,40 @@ final class FakeFocusOracle: FocusInspecting {
     private var answer = FocusInspection(security: .notSecure, caretRead: .unavailable)
     private var lengths: [Int?] = []
     private var invalidations = 0
+    private var selection: SelectionRead = .noSelection
+    private var selectionCalls = 0
 
     /// Run on the pipeline queue, just before the answer is handed back. The
     /// only way to reproduce a keystroke landing *during* the round trip, which
     /// is the race the input serial exists for.
     var beforeAnswering: (() -> Void)?
+
+    /// The counterpart of `beforeAnswering` for the selection read, and there
+    /// for the same reason: a real ⌘C round trip is the better part of a
+    /// second, and anything the user does inside it has to be reproducible.
+    var beforeSelectionAnswer: (() -> Void)?
+
+    /// What the next `selectedText` reports back. Defaults to the answer a
+    /// field with a caret and nothing highlighted gives.
+    var selectionAnswer: SelectionRead {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return selection
+        }
+        set {
+            lock.lock()
+            selection = newValue
+            lock.unlock()
+        }
+    }
+
+    /// How many times the pipeline asked what was selected.
+    var selectionRequests: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return selectionCalls
+    }
 
     func answer(_ inspection: FocusInspection) {
         lock.lock()
@@ -110,6 +215,15 @@ final class FakeFocusOracle: FocusInspecting {
         let answer = self.answer
         lock.unlock()
         beforeAnswering?()
+        completion(answer)
+    }
+
+    func selectedText(pid: pid_t?, completion: @escaping (SelectionRead) -> Void) {
+        lock.lock()
+        selectionCalls += 1
+        let answer = selection
+        lock.unlock()
+        beforeSelectionAnswer?()
         completion(answer)
     }
 
@@ -154,6 +268,7 @@ final class PipelineHarness {
     let oracle = FakeFocusOracle()
     let secureInput = FakeSecureInput()
     let suggestionState = SuggestionState()
+    let cardFrames = CardFrames()
     let frontmost = FrontmostAppTracker()
     let settings: SettingsStore
     let pipeline: TypingPipeline
@@ -166,6 +281,9 @@ final class PipelineHarness {
     private var undoCount = 0
     private var hides = 0
     private var switches: [String] = []
+    private var flipped: [Flip] = []
+    /// Fulfilled by the next flip that lands. See `awaitFlipCard`.
+    private var flipWaiter: XCTestExpectation?
 
     /// - Parameter axVerifySkip: seeded into the settings blob before the store
     ///   reads it, because there is no setter for it — it is a hand-edited
@@ -184,14 +302,23 @@ final class PipelineHarness {
             frontmost: frontmost,
             secureInput: secureInput,
             suggestionState: suggestionState,
+            cardFrames: cardFrames,
             fixEngine: engine,
             focus: oracle)
+
+        // The layouts a flip renders through. The real cache is populated from
+        // the input sources enabled on whichever machine runs the suite, so
+        // without this every flip test would depend on the tester having
+        // Arabic installed.
+        pipeline.layoutPair = { HarnessLayouts.pair }
 
         pipeline.onSuggest = { [weak self] offer in self?.append(offer: offer.fix) }
         pipeline.onAutoApply = { [weak self] applied in self?.append(applied: applied) }
         pipeline.onRequestRejected = { [weak self] in self?.bumpRejections() }
         pipeline.onUndoApplied = { [weak self] in self?.bumpUndos() }
         pipeline.onHideSuggestion = { [weak self] in self?.bumpHides() }
+        // Main thread, like the card controller that normally receives it.
+        pipeline.onFlipApplied = { [weak self] flip, _ in self?.append(flip: flip) }
 
         // Every applied fix ends by switching the keyboard layout, and the app
         // hears that back. On by default, because a fix that does not announce
@@ -199,6 +326,10 @@ final class PipelineHarness {
         engine.afterApply = { [weak self] fix in
             self?.noteLayoutSwitch(fix.targetLayoutID)
             self?.pipeline.inputSourceChanged(to: fix.targetLayoutID)
+        }
+        engine.afterReplace = { [weak self] targetLayoutID in
+            self?.noteLayoutSwitch(targetLayoutID)
+            self?.pipeline.inputSourceChanged(to: targetLayoutID)
         }
 
         pipeline.setCaptureActive(true)
@@ -243,8 +374,10 @@ final class PipelineHarness {
             timestamp: Date().timeIntervalSinceReferenceDate)))
     }
 
-    func click() {
-        send(.mouseDown(at: .zero, primaryButton: true))
+    /// - Parameter location: in display coordinates, the way `CGEvent` reports
+    ///   a click and the way both card registries store their rectangles.
+    func click(at location: CGPoint = .zero) {
+        send(.mouseDown(at: location, primaryButton: true))
     }
 
     /// The user picking a layout out of the menu bar, as the pipeline's own
@@ -259,9 +392,18 @@ final class PipelineHarness {
         drain()
     }
 
+    /// - Parameter rounds: more than the default, because the flip is the
+    ///   longest chain in the pipeline: security check, selection read, the
+    ///   copy that may follow it, resolve, apply, the read-back, finish, and
+    ///   the layout announcement each of those hops behind the last.
+    func flip(rounds: Int = 10) {
+        pipeline.flipSelection()
+        drain(rounds)
+    }
+
     /// Lets everything already queued run, and everything those blocks queue in
-    /// turn. Six rounds is comfortably more than the deepest chain — gate,
-    /// resolve, apply, finish.
+    /// turn. Six rounds covers the ordinary chain — gate, resolve, apply,
+    /// finish; the flip is longer, which is what `flip(rounds:)` is for.
     func drain(_ rounds: Int = 6) {
         for _ in 0..<rounds { pipeline.queue.sync {} }
     }
@@ -309,6 +451,36 @@ final class PipelineHarness {
         return hides
     }
 
+    /// The flips published to the card, in order.
+    var flips: [Flip] {
+        lock.lock()
+        defer { lock.unlock() }
+        return flipped
+    }
+
+    /// The first flip published to the card, waiting for it if it has not
+    /// arrived yet.
+    ///
+    /// `onFlipApplied` lands on the main thread, which is the thread the test
+    /// itself is running on: draining the pipeline queue proves nothing about
+    /// it, and reading `flips` straight after a flip would always find it
+    /// empty. Waiting on an expectation is what lets the main queue run.
+    func awaitFlipCard(_ test: XCTestCase, timeout: TimeInterval = 1) -> Flip? {
+        lock.lock()
+        if let first = flipped.first {
+            lock.unlock()
+            return first
+        }
+        let waiting = test.expectation(description: "a flip was published to the card")
+        // Registered under the same lock the callback takes, so a flip landing
+        // between the check above and here cannot go unnoticed.
+        flipWaiter = waiting
+        lock.unlock()
+
+        test.wait(for: [waiting], timeout: timeout)
+        return flips.first
+    }
+
     /// The layout switches the applies announced, in order.
     var layoutSwitches: [String] {
         lock.lock()
@@ -338,6 +510,15 @@ final class PipelineHarness {
         lock.unlock()
     }
 
+    private func append(flip: Flip) {
+        lock.lock()
+        flipped.append(flip)
+        let waiting = flipWaiter
+        flipWaiter = nil
+        lock.unlock()
+        waiting?.fulfill()
+    }
+
     private func bumpRejections() {
         lock.lock()
         rejections += 1
@@ -355,6 +536,35 @@ final class PipelineHarness {
         hides += 1
         lock.unlock()
     }
+}
+
+// MARK: - Layouts
+
+/// The committed `uchr` snapshot, as the flip paths need it.
+///
+/// `DodomaCoreTests` loads the same file through `LayoutFixtures`, but one test
+/// target cannot import another and the JSON is a resource of that target's
+/// bundle, so it is read off the source tree here. `#filePath` is what makes
+/// that work under both `swift test` and Xcode, whose working directories
+/// differ.
+enum HarnessLayouts {
+    static let url =
+        URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()  // Tests/DodomaAppTests
+        .deletingLastPathComponent()  // Tests
+        .appendingPathComponent("DodomaCoreTests/Fixtures/layout-tables.json")
+
+    /// Nil when the snapshot is missing or malformed. Tests that need it say
+    /// so once, rather than failing with a decoding error each.
+    static let pair: (english: KeyboardLayout, arabic: KeyboardLayout)? = {
+        guard
+            let data = try? Data(contentsOf: url),
+            let fixtures = try? JSONDecoder().decode([LayoutFixture].self, from: data),
+            let english = fixtures.first(where: { $0.sourceID == Fixtures.english })?.makeLayout(),
+            let arabic = fixtures.first(where: { $0.sourceID == Fixtures.arabic })?.makeLayout()
+        else { return nil }
+        return (english, arabic)
+    }()
 }
 
 // MARK: - Fixtures

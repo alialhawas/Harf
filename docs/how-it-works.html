@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dodoma — How It Works</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&family=Cairo:wght@300;400;600;700;900&family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Tajawal:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0D1218;
+  --bg-2: #131a23;
+  --teal: #5bc2ab;
+  --teal-dim: #5bc2ab33;
+  --teal-soft: #5bc2ab14;
+  --text: #f1f3f6;
+  --text-dim: #9aa3b2;
+  --text-mute: #6b7585;
+  --line: #1f2731;
+  --line-soft: #1a222b;
+  --c-mint: #BDE6C2;
+  --c-sky: #BCDEE6;
+  --c-cream: #DBE6BC;
+  --c-peach: #E6DABC;
+  --c-rose: #E6BDBC;
+  --c-pink: #E6BCE4;
+  --c-lavender: #BCC0E6;
+  --good: #69d39a;
+  --warn: #e6c45b;
+  --bad: #e87474;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.deck { position: relative; width: 100vw; height: 100vh; overflow: hidden; }
+
+.slide {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 8vh 7vw;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(30px);
+  transition: opacity 0.55s ease, transform 0.55s ease;
+  overflow-y: auto;
+}
+.slide.active { opacity: 1; pointer-events: auto; transform: translateY(0); }
+
+.blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.32;
+  pointer-events: none;
+  z-index: 0;
+}
+.blob-1 { width: 520px; height: 520px; top: -160px; left: -160px; }
+.blob-2 { width: 420px; height: 420px; bottom: -130px; right: -110px; opacity: 0.22; }
+
+.chapter-tag {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-dim);
+  letter-spacing: 1.5px;
+  margin-bottom: 22px;
+  z-index: 2;
+  text-transform: uppercase;
+}
+.chapter-tag::before { content: ''; width: 32px; height: 1px; background: var(--teal); }
+.chapter-tag .num { color: var(--teal); font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+
+.headline {
+  position: relative;
+  font-weight: 800;
+  font-size: clamp(40px, 5.4vw, 78px);
+  line-height: 1.08;
+  letter-spacing: -1.5px;
+  margin-bottom: 22px;
+  z-index: 2;
+  max-width: 1200px;
+}
+.headline.compact { font-size: clamp(32px, 3.6vw, 52px); }
+.headline .accent { color: var(--teal); }
+
+.lead {
+  position: relative;
+  font-size: clamp(16px, 1.35vw, 22px);
+  line-height: 1.6;
+  color: var(--text-dim);
+  max-width: 1000px;
+  font-weight: 400;
+  z-index: 2;
+  margin-bottom: 18px;
+}
+.lead strong { color: var(--text); font-weight: 600; }
+
+.bullets { position: relative; list-style: none; margin-top: 22px; z-index: 2; max-width: 1100px; }
+.bullets li {
+  font-size: clamp(15px, 1.15vw, 19px);
+  line-height: 1.5;
+  padding: 12px 0 12px 26px;
+  position: relative;
+  color: var(--text);
+  font-weight: 400;
+  border-bottom: 1px solid var(--line);
+}
+.bullets li:last-child { border-bottom: none; }
+.bullets li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 22px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--teal);
+}
+.bullets li strong { color: var(--teal); font-weight: 700; }
+.bullets.compact li { font-size: clamp(13px, 0.95vw, 16px); padding: 8px 0 8px 22px; line-height: 1.45; }
+.bullets.compact li::before { top: 16px; width: 7px; height: 7px; }
+
+.hud {
+  position: fixed; top: 28px; left: 0; right: 0;
+  padding: 0 7vw;
+  display: flex; justify-content: space-between; align-items: center;
+  z-index: 100; pointer-events: none;
+}
+.brand {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  color: var(--text-dim);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  display: flex; align-items: center; gap: 10px;
+}
+.brand::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 12px var(--teal); }
+.counter { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--text-dim); letter-spacing: 2px; }
+.counter .current { color: var(--teal); font-weight: 600; }
+
+.dots {
+  position: fixed; right: 24px; top: 50%; transform: translateY(-50%);
+  display: flex; flex-direction: column; gap: 10px;
+  z-index: 100;
+}
+.dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--line);
+  border: none; cursor: pointer; padding: 0;
+  transition: all 0.3s ease;
+}
+.dot.active { background: var(--teal); transform: scale(1.4); }
+.dot:hover { background: var(--text-dim); }
+
+.cover { align-items: flex-start; justify-content: center; }
+.cover-title {
+  font-weight: 900;
+  font-size: clamp(54px, 8.5vw, 130px);
+  line-height: 1;
+  letter-spacing: -3px;
+  background: linear-gradient(135deg, #fff 0%, var(--teal) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 26px;
+  position: relative; z-index: 2;
+  max-width: 1200px;
+}
+.cover-subtitle {
+  font-size: clamp(20px, 2vw, 32px);
+  font-weight: 400;
+  color: var(--text-dim);
+  position: relative; z-index: 2;
+  max-width: 900px;
+  line-height: 1.4;
+}
+.cover-tag {
+  margin-top: 50px;
+  display: flex; align-items: center; gap: 16px;
+  color: var(--text-mute);
+  font-size: 14px;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 1.5px;
+  position: relative; z-index: 2;
+  text-transform: uppercase;
+}
+.cover-tag-line { width: 60px; height: 1px; background: var(--text-mute); }
+
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 50px; align-items: start; position: relative; z-index: 2; }
+.two-col.lean-left  { grid-template-columns: 1.1fr 0.9fr; }
+.two-col.lean-right { grid-template-columns: 0.9fr 1.1fr; }
+
+.card {
+  background: rgba(255,255,255,0.025);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 22px 24px;
+  backdrop-filter: blur(8px);
+  position: relative; z-index: 2;
+}
+.card-title {
+  font-weight: 700;
+  font-size: clamp(15px, 1.1vw, 18px);
+  color: var(--teal);
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+  letter-spacing: 0.5px;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.card-title .badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-mute);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.card-body { color: var(--text); font-size: clamp(13px, 0.95vw, 15px); line-height: 1.6; }
+.card-body strong { color: var(--teal); font-weight: 600; }
+
+.grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; position: relative; z-index: 2; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; position: relative; z-index: 2; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; position: relative; z-index: 2; }
+
+.qa-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: clamp(12px, 0.92vw, 15px);
+  position: relative; z-index: 2;
+  background: rgba(255,255,255,0.015);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.qa-table thead { background: rgba(91,194,171,0.08); }
+.qa-table th {
+  text-align: left;
+  padding: 14px 18px;
+  font-weight: 600;
+  color: var(--teal);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--line);
+}
+.qa-table td {
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--text);
+  vertical-align: top;
+}
+.qa-table td.metric { font-weight: 600; color: var(--teal); font-family: 'JetBrains Mono', monospace; font-size: 13px; }
+.qa-table tr:last-child td { border-bottom: none; }
+.qa-table tr:hover td { background: rgba(255,255,255,0.02); }
+.pill {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: 'JetBrains Mono', monospace;
+}
+.pill.good { background: rgba(105,211,154,0.12); color: var(--good); }
+.pill.warn { background: rgba(230,196,91,0.12); color: var(--warn); }
+.pill.bad  { background: rgba(232,116,116,0.14); color: var(--bad); }
+
+.formula {
+  font-family: 'JetBrains Mono', monospace;
+  background: rgba(91,194,171,0.05);
+  border: 1px solid var(--teal-dim);
+  border-radius: 10px;
+  padding: 16px 20px;
+  color: var(--text);
+  font-size: clamp(13px, 1vw, 16px);
+  line-height: 1.7;
+  margin: 14px 0;
+  position: relative; z-index: 2;
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+.formula .var { color: var(--teal); font-weight: 600; }
+.formula .comment { color: var(--text-mute); }
+
+.src {
+  display: inline-block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-mute);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--text-mute);
+  margin: 0 2px;
+  letter-spacing: 0.3px;
+}
+.src:hover { color: var(--teal); border-color: var(--teal); }
+
+.sources-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px 28px;
+  position: relative; z-index: 2;
+  max-width: 1500px;
+  margin-top: 18px;
+}
+.sources-grid a {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-decoration: none;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line-soft);
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+}
+.sources-grid a:hover { color: var(--teal); }
+.sources-grid a .ref { color: var(--teal); font-weight: 600; min-width: 100px; }
+.sources-grid a .lbl { flex: 1; }
+
+.stat-tile {
+  background: rgba(255,255,255,0.025);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 20px 22px;
+}
+.stat-tile .stat-num {
+  font-size: clamp(28px, 3vw, 44px);
+  font-weight: 800;
+  color: var(--teal);
+  line-height: 1.1;
+  margin-bottom: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: -1px;
+}
+.stat-tile .stat-label { font-size: 13px; color: var(--text-dim); font-weight: 500; }
+.stat-tile .stat-note { font-size: 12px; color: var(--text-mute); margin-top: 8px; line-height: 1.5; }
+
+.diagram {
+  background: rgba(15, 28, 26, 0.55);
+  border: 1px solid rgba(91, 194, 171, 0.15);
+  border-radius: 16px;
+  padding: 24px;
+  backdrop-filter: blur(8px);
+  position: relative; z-index: 2;
+  margin-top: 20px;
+}
+.diagram-label {
+  color: var(--teal);
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  margin-bottom: 16px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.diagram svg { width: 100%; height: auto; display: block; }
+
+.layer-stack { display: flex; flex-direction: column; gap: 12px; position: relative; z-index: 2; margin-top: 20px; }
+.layer-row {
+  display: grid;
+  grid-template-columns: 110px 1fr 160px;
+  gap: 24px;
+  align-items: center;
+  padding: 18px 22px;
+  background: rgba(255,255,255,0.025);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--teal);
+  border-radius: 12px;
+}
+.layer-row .layer-num { font-family: 'JetBrains Mono', monospace; color: var(--teal); font-size: 13px; font-weight: 600; letter-spacing: 1.5px; }
+.layer-row .layer-name { font-size: clamp(15px, 1.15vw, 19px); font-weight: 600; color: var(--text); }
+.layer-row .layer-desc { font-size: clamp(12px, 0.85vw, 14px); color: var(--text-dim); margin-top: 4px; }
+.layer-row .layer-tools { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-mute); text-align: right; line-height: 1.6; }
+
+/* Default slide blob colors — duplicate + override per slide for variety */
+#slide-1 .blob-1 { background: var(--teal); opacity: 0.4; }
+#slide-1 .blob-2 { background: var(--c-sky); }
+
+/* Stagger animations */
+.slide.active .chapter-tag { animation: rise 0.6s ease 0.1s both; }
+.slide.active .headline { animation: rise 0.6s ease 0.2s both; }
+.slide.active .lead { animation: rise 0.6s ease 0.3s both; }
+.slide.active .cover-title { animation: rise 0.8s ease 0.1s both; }
+.slide.active .cover-subtitle { animation: rise 0.8s ease 0.3s both; }
+.slide.active .cover-tag { animation: rise 0.8s ease 0.5s both; }
+.slide.active .qa-table,
+.slide.active .formula,
+.slide.active .diagram,
+.slide.active .layer-stack,
+.slide.active .grid-2,
+.slide.active .grid-3,
+.slide.active .grid-4,
+.slide.active .sources-grid { animation: rise 0.6s ease 0.4s both; }
+.slide.active .bullets li:nth-child(1) { animation: rise 0.6s ease 0.4s both; }
+.slide.active .bullets li:nth-child(2) { animation: rise 0.6s ease 0.5s both; }
+.slide.active .bullets li:nth-child(3) { animation: rise 0.6s ease 0.6s both; }
+.slide.active .bullets li:nth-child(4) { animation: rise 0.6s ease 0.7s both; }
+.slide.active .bullets li:nth-child(5) { animation: rise 0.6s ease 0.75s both; }
+.slide.active .bullets li:nth-child(6) { animation: rise 0.6s ease 0.8s both; }
+
+@keyframes rise { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
+
+.thanks { align-items: center; justify-content: center; text-align: center; }
+.thanks .headline { text-align: center; }
+.thanks .lead { text-align: center; margin-left: auto; margin-right: auto; }
+
+@media (max-width: 1100px) {
+  .slide { padding: 10vh 5vw; }
+  .two-col, .two-col.lean-left, .two-col.lean-right { grid-template-columns: 1fr; gap: 28px; }
+  .grid-3, .grid-4 { grid-template-columns: 1fr 1fr; }
+  .layer-row { grid-template-columns: 80px 1fr; }
+  .layer-row .layer-tools { display: none; }
+  .sources-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<div class="hud">
+  <div class="brand">DODOMA</div>
+  <div class="counter"><span class="current">01</span> / <span class="total">03</span></div>
+</div>
+
+<div class="deck">
+
+  <!-- 01 COVER -->
+  <section class="slide cover active" id="slide-1">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <h1 class="cover-title">Dodoma</h1>
+    <p class="cover-subtitle">A macOS menu-bar app that notices when you typed Arabic on the English layout — or the reverse — and rewrites it in place, switching the keyboard as it goes.</p>
+    <div class="cover-tag">
+      <div class="cover-tag-line"></div>
+      <span>13 SLIDES · HOW IT WORKS · v1.0.0</span>
+    </div>
+  </section>
+
+  <!-- 02 PROBLEM -->
+  <section class="slide" id="slide-2">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="chapter-tag"><span class="num">00</span><span>The Problem</span></div>
+    <h1 class="headline">You never forget the language. You forget <span class="accent">the layout.</span></h1>
+    <p class="lead">Writing in two languages means switching input source dozens of times a day. The switch <strong>back</strong> is the one that gets missed — and nothing warns you until a whole sentence is already on screen as nonsense.</p>
+    <div class="grid-2" style="margin-top: 22px;">
+      <div class="stat-tile">
+        <div class="stat-num" style="font-family:'JetBrains Mono',monospace;font-size:26px;">hgsghl ugdj</div>
+        <div class="stat-label">what appeared</div>
+        <div class="stat-note">Arabic typed while the US layout was active.</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-num" style="font-size:30px;">السلام عليك</div>
+        <div class="stat-label">what was meant</div>
+        <div class="stat-note">Every key pressed was already the correct key.</div>
+      </div>
+    </div>
+    <p class="lead" style="margin-top:20px;">The old fix is manual and identical every time: <strong>select, delete, switch layout, retype.</strong> A dozen times a day, that interrupts the thought you were actually having.</p>
+  </section>
+
+  <!-- 03 THE INSIGHT -->
+  <section class="slide" id="slide-3">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="chapter-tag"><span class="num">01</span><span>The Key Idea</span></div>
+    <h1 class="headline compact">Record the <span class="accent">key</span>, not the letter.</h1>
+    <p class="lead">The letters on screen are the wrong evidence — they are already the mistake. The <strong>physical key</strong> you pressed is the same key in both layouts, so your intent is recoverable <strong>exactly</strong>, with no guessing.</p>
+    <div class="grid-3" style="margin-top: 20px;">
+      <div class="card">
+        <div class="card-title">What Dodoma stores <span class="badge">KEYCODE</span></div>
+        <div class="card-body">Key <strong>4</strong>, key <strong>1</strong>, key <strong>5</strong>… physical positions, layout-independent. Plus the modifier state and what the key actually produced.</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Rendered as English</div>
+        <div class="card-body"><span style="font-family:'JetBrains Mono',monospace;">h · s · g</span><br><br>Meaningless in English. No dictionary hit, impossible letter pairs.</div>
+      </div>
+      <div class="card" style="border-left: 3px solid var(--teal);">
+        <div class="card-title">Rendered as Arabic</div>
+        <div class="card-body"><span style="font-size:20px;">ا · س · ل</span><br><br>Real words. That gap is the entire signal.</div>
+      </div>
+    </div>
+    <p class="lead" style="margin-top:20px;">Both renderings come from macOS's own <strong>uchr</strong> layout tables — not a hand-written substitution map — so shifted keys, Caps Lock and the Arabic <span style="font-size:18px;">لا</span> ligature all come out right.</p>
+  </section>
+
+  <!-- 04 PIPELINE -->
+  <section class="slide" id="slide-4">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="chapter-tag"><span class="num">02</span><span>The Pipeline</span></div>
+    <h1 class="headline compact">Six stages, <span class="accent">one second.</span></h1>
+    <p class="lead">Nothing happens while you are still typing. The whole chain fires on the pause.</p>
+    <div class="diagram" style="margin-top: 18px;">
+      <div class="diagram-label">keystroke → buffer → pause → render ×2 → score → decide → apply</div>
+      <svg viewBox="0 0 1240 200" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#5bc2ab"/>
+          </marker>
+        </defs>
+        <g>
+          <rect x="10" y="60" width="170" height="80" rx="10" fill="rgba(20, 64, 58, 0.45)" stroke="rgba(91,194,171,0.4)" stroke-width="1.5"/>
+          <text x="95" y="95" text-anchor="middle" fill="#fff" font-family="Inter" font-weight="600" font-size="15">Capture</text>
+          <text x="95" y="118" text-anchor="middle" fill="rgba(91,194,171,0.8)" font-family="JetBrains Mono" font-size="11">event tap · keycodes</text>
+          <path d="M 180 100 L 230 100" stroke="#5bc2ab" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+
+          <rect x="230" y="60" width="170" height="80" rx="10" fill="rgba(20, 64, 58, 0.45)" stroke="rgba(91,194,171,0.4)" stroke-width="1.5"/>
+          <text x="315" y="95" text-anchor="middle" fill="#fff" font-family="Inter" font-weight="600" font-size="15">Buffer</text>
+          <text x="315" y="118" text-anchor="middle" fill="rgba(91,194,171,0.8)" font-family="JetBrains Mono" font-size="11">resets on Enter/click</text>
+          <path d="M 400 100 L 450 100" stroke="#5bc2ab" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+
+          <rect x="450" y="60" width="170" height="80" rx="10" fill="rgba(20, 64, 58, 0.45)" stroke="rgba(91,194,171,0.4)" stroke-width="1.5"/>
+          <text x="535" y="95" text-anchor="middle" fill="#fff" font-family="Inter" font-weight="600" font-size="15">Render ×2</text>
+          <text x="535" y="118" text-anchor="middle" fill="rgba(91,194,171,0.8)" font-family="JetBrains Mono" font-size="11">both layouts</text>
+          <path d="M 620 100 L 670 100" stroke="#5bc2ab" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+
+          <rect x="670" y="60" width="170" height="80" rx="10" fill="rgba(20, 64, 58, 0.45)" stroke="rgba(91,194,171,0.4)" stroke-width="1.5"/>
+          <text x="755" y="95" text-anchor="middle" fill="#fff" font-family="Inter" font-weight="600" font-size="15">Score</text>
+          <text x="755" y="118" text-anchor="middle" fill="rgba(91,194,171,0.8)" font-family="JetBrains Mono" font-size="11">offline · on-device</text>
+          <path d="M 840 100 L 890 100" stroke="#5bc2ab" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+
+          <rect x="890" y="60" width="150" height="80" rx="10" fill="rgba(20, 64, 58, 0.45)" stroke="rgba(91,194,171,0.4)" stroke-width="1.5"/>
+          <text x="965" y="95" text-anchor="middle" fill="#fff" font-family="Inter" font-weight="600" font-size="15">Gates</text>
+          <text x="965" y="118" text-anchor="middle" fill="rgba(91,194,171,0.8)" font-family="JetBrains Mono" font-size="11">safety checks</text>
+          <path d="M 1040 100 L 1090 100" stroke="#5bc2ab" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+
+          <rect x="1090" y="60" width="140" height="80" rx="10" fill="rgba(91,194,171,0.08)" stroke="#5bc2ab" stroke-width="2"/>
+          <text x="1160" y="95" text-anchor="middle" fill="#fff" font-family="Inter" font-weight="700" font-size="15">Apply</text>
+          <text x="1160" y="118" text-anchor="middle" fill="rgba(91,194,171,0.9)" font-family="JetBrains Mono" font-size="11">≈160 ms</text>
+        </g>
+      </svg>
+    </div>
+  </section>
+
+  <!-- 05 CAPTURE -->
+  <section class="slide" id="slide-5">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="chapter-tag"><span class="num">03</span><span>Stage 1 — Capture</span></div>
+    <h1 class="headline compact">Watching every key, <span class="accent">holding almost nothing.</span></h1>
+    <p class="lead">A <strong>CGEventTap</strong> on its own thread sees every keystroke system-wide. It must be fast — a slow callback makes macOS disable the tap and freezes typing everywhere — so it copies four fields and hands off.</p>
+    <div class="layer-stack" style="margin-top:16px;">
+      <div class="layer-row">
+        <div class="layer-num">KEEP</div>
+        <div><div class="layer-name">Keycode, modifiers, produced text, timestamp</div>
+        <div class="layer-desc">The minimum needed to re-render the sequence under another layout.</div></div>
+        <div class="layer-tools">≤ 200 keys<br>in memory only</div>
+      </div>
+      <div class="layer-row">
+        <div class="layer-num">DROP</div>
+        <div><div class="layer-name">Anything that means "the thought ended"</div>
+        <div class="layer-desc">Enter, Tab, arrows, a click, a ⌘/⌃ shortcut, switching app, 10 s idle — buffer cleared.</div></div>
+        <div class="layer-tools">no disk<br>no network</div>
+      </div>
+      <div class="layer-row">
+        <div class="layer-num">NEVER</div>
+        <div><div class="layer-name">Password and secure fields</div>
+        <div class="layer-desc">Secure input and AX-secure fields purge the buffer and the keystroke log outright.</div></div>
+        <div class="layer-tools">two independent<br>checks</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 06 RENDER -->
+  <section class="slide" id="slide-6">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="chapter-tag"><span class="num">04</span><span>Stage 2 — Render Twice</span></div>
+    <h1 class="headline compact">The same keys, read through <span class="accent">two alphabets.</span></h1>
+    <p class="lead">After one second of quiet, the buffered keycodes go through <strong>UCKeyTranslate</strong> against each enabled layout's real table. Modifier handling is tried three ways, because Caps Lock and Shift are not the same thing in Arabic.</p>
+    <table class="qa-table" style="margin-top: 14px;">
+      <thead><tr><th style="width:22%">Cap mode</th><th style="width:34%">Why it exists</th><th>Result for the canonical sample</th></tr></thead>
+      <tbody>
+        <tr><td class="metric">as typed</td><td>Exactly the modifiers you held.</td><td><span style="font-family:'JetBrains Mono',monospace;">آئ ؤءك…</span> — diacritic junk</td></tr>
+        <tr><td class="metric">shift stripped</td><td>Caps Lock on is the most common way this mistake happens.</td><td style="color:var(--teal);">اذ ودك انا اسويها اليوم</td></tr>
+        <tr><td class="metric">lowercased</td><td>Shift and Caps both dropped.</td><td style="color:var(--teal);">اذ ودك انا اسويها اليوم</td></tr>
+      </tbody>
+    </table>
+    <p class="lead" style="margin-top:18px;">The best-scoring of the three wins. This is also why no key table is hard-coded: the <strong>Mac</strong> Arabic layout differs from the Windows one (<span style="font-family:'JetBrains Mono',monospace;">c=ذ v=د m=و</span>), and Dodoma reads whichever layouts you actually have enabled.</p>
+  </section>
+
+  <!-- 07 SCORE -->
+  <section class="slide" id="slide-7">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="chapter-tag"><span class="num">05</span><span>Stage 3 — Score</span></div>
+    <h1 class="headline compact">Two numbers decide it — <span class="accent">both computed on your Mac.</span></h1>
+    <p class="lead">There is no model call and no network code anywhere in the app. Each rendering is scored against bundled frequency data for its language.</p>
+    <div class="two-col" style="margin-top: 18px;">
+      <div>
+        <div class="formula"><span class="var">score</span> = 0.55 × <span class="var">bigram</span> + 0.45 × <span class="var">dictCoverage</span>
+
+<span class="comment"># bigram        how plausible the letter
+#               pairs are in that language
+# dictCoverage  share of letters inside
+#               real dictionary words</span></div>
+        <p style="font-size: 13px; color: var(--text-dim); margin-top: 12px; line-height: 1.6;">
+          Arabic lookups strip harakat and clitics (<span style="font-size:15px;">و ف ب ل ال</span>); English strips <span style="font-family:'JetBrains Mono',monospace;">s / ed / ing / 's</span>. Data: OpenSubtitles frequency lists, ~40k words per language.
+        </p>
+      </div>
+      <div>
+        <div class="card">
+          <div class="card-title">The canonical sample <span class="badge">REAL OUTPUT</span></div>
+          <div class="card-body">
+            <table class="qa-table" style="margin-top:4px;">
+              <thead><tr><th>Reading</th><th>bigram</th><th>dict</th><th>score</th></tr></thead>
+              <tbody>
+                <tr><td class="metric">as typed (en)</td><td>0.01</td><td>0.00</td><td><span class="pill bad">0.01</span></td></tr>
+                <tr><td class="metric">alternate (ar)</td><td>0.85</td><td>0.49</td><td><span class="pill good">0.69</span></td></tr>
+              </tbody>
+            </table>
+            <p style="font-size: 12px; color: var(--text-mute); margin-top:10px;">Gap 0.68 — far past the 0.40 needed to rewrite silently.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 08 DECIDE -->
+  <section class="slide" id="slide-8">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="chapter-tag"><span class="num">06</span><span>Stage 4 — Decide</span></div>
+    <h1 class="headline compact">Three outcomes, and <span class="accent">most of the time it does nothing.</span></h1>
+    <p class="lead">A high score is not enough on its own. The region has to be long enough, and every guard has to stay quiet.</p>
+    <div class="grid-3" style="margin-top: 20px;">
+      <div class="card" style="border-left: 3px solid var(--teal);">
+        <div class="card-title">Rewrite <span class="badge">CLEAR WIN</span></div>
+        <div class="card-body">Alternate ≥ 0.62, current ≤ 0.28, gap ≥ 0.40, ≥ 6 letters, no guard fired. Happens silently.</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Suggest <span class="badge">BORDERLINE</span></div>
+        <div class="card-body">A card near the caret. <strong>Tab</strong> or click accepts, <strong>Esc</strong> or typing dismisses, gone after 4 s.</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Ignore <span class="badge">DEFAULT</span></div>
+        <div class="card-body">Everything else. Normal writing in either language never triggers anything.</div>
+      </div>
+    </div>
+    <p class="lead" style="margin-top:20px;">Guards that veto a rewrite outright: <strong>URLs, paths, emails</strong>, digits touching letters, <span style="font-family:'JetBrains Mono',monospace;">camelCase</span> and <span style="font-family:'JetBrains Mono',monospace;">snake_case</span>, single short tokens, mixed scripts inside one word, and anything you just undid.</p>
+    <p class="lead" style="margin-top:10px;">Only the <strong>trailing run</strong> is ever rewritten — so <span style="font-family:'JetBrains Mono',monospace;">check this hgsghl</span> touches the last word only, and a genuinely bilingual sentence is left alone.</p>
+  </section>
+
+  <!-- 09 SAFETY -->
+  <section class="slide" id="slide-9">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="chapter-tag"><span class="num">07</span><span>Stage 5 — Safety</span></div>
+    <h1 class="headline compact">It is about to <span class="accent">delete your text.</span></h1>
+    <p class="lead">Everything above only decides <em>what</em> to do. These gates decide whether it is allowed to happen at all — each one can only ever cancel the fix, never cause one.</p>
+    <div class="grid-4" style="margin-top: 20px;">
+      <div class="stat-tile"><div class="stat-num" style="font-size:22px;">Policy</div><div class="stat-label">per app</div><div class="stat-note">Terminals suggest only. Password managers off entirely. Any app can be set to Normal / Suggest / Off.</div></div>
+      <div class="stat-tile"><div class="stat-num" style="font-size:22px;">Secure</div><div class="stat-label">password fields</div><div class="stat-note">Secure input and AX secure fields drop the buffer and purge the keystroke log.</div></div>
+      <div class="stat-tile"><div class="stat-num" style="font-size:22px;">Verify</div><div class="stat-label">before deleting</div><div class="stat-note">The app is asked what sits in front of the caret. No match, no answer — downgrade to a suggestion.</div></div>
+      <div class="stat-tile"><div class="stat-num" style="font-size:22px;">Focus</div><div class="stat-label">every event</div><div class="stat-note">The frontmost app is re-checked before each injected keystroke, so a ⌘-Tab mid-burst aborts it.</div></div>
+    </div>
+    <p class="lead" style="margin-top:20px;">If you type anything while a fix is being decided, it is <strong>abandoned</strong> — the record no longer matches the screen, and a stale record is exactly how a tool like this corrupts text.</p>
+  </section>
+
+  <!-- 10 APPLY -->
+  <section class="slide" id="slide-10">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="chapter-tag"><span class="num">08</span><span>Stage 6 — Apply</span></div>
+    <h1 class="headline compact">Delete, type, <span class="accent">switch — in about 160 ms.</span></h1>
+    <p class="lead">macOS has no "reinterpret that text" call, so the fix is performed the only way it can be: by pressing keys, very fast, on your behalf.</p>
+    <table class="qa-table" style="margin-top: 14px;">
+      <thead><tr><th style="width:8%">#</th><th style="width:32%">Step</th><th style="width:20%">Pace</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td class="metric">1</td><td>Backspace, once per character</td><td><span class="pill good">3 ms</span></td><td>Was 10 ms — a 23-character fix spent half a second visibly erasing itself.</td></tr>
+        <tr><td class="metric">2</td><td>Settle</td><td><span class="pill good">15 ms</span></td><td>Let the app catch up before text arrives.</td></tr>
+        <tr><td class="metric">3</td><td>Inject the corrected text</td><td><span class="pill good">2 ms</span></td><td>Up to 60 characters per event — effectively one shot.</td></tr>
+        <tr><td class="metric">4</td><td>Switch the input source</td><td><span class="pill good">last</span></td><td>After the text lands, so the app's IME cannot interfere mid-insert.</td></tr>
+      </tbody>
+    </table>
+    <p class="lead" style="margin-top:18px;">Injected keystrokes are stamped with a marker so Dodoma <strong>ignores its own typing</strong> — otherwise the fix would be detected as new input and fixed again, forever.</p>
+  </section>
+
+  <!-- 11 UNDO -->
+  <section class="slide" id="slide-11">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="chapter-tag"><span class="num">09</span><span>When It Is Wrong</span></div>
+    <h1 class="headline compact">One key puts it <span class="accent">back.</span></h1>
+    <p class="lead">A tool that edits your text without asking needs an exit that works even when everything else is jammed. The hotkeys are registered with Carbon, <strong>outside</strong> the event tap, so they respond even if the tap itself has stalled.</p>
+    <div class="grid-3" style="margin-top: 20px;">
+      <div class="card" style="border-left: 3px solid var(--teal);">
+        <div class="card-title">⌥⌘Z <span class="badge">30 s</span></div>
+        <div class="card-body">Restores exactly what you typed, switches the layout back, and suppresses re-fixing that text for 60 s so it cannot bounce.</div>
+      </div>
+      <div class="card">
+        <div class="card-title">⌥⌘P <span class="badge">PAUSE</span></div>
+        <div class="card-body">Stops all rewriting instantly, everywhere. The tap keeps running; nothing is evaluated.</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Per-app <span class="badge">SETTINGS</span></div>
+        <div class="card-body">Set any app to Suggest-only or Off. Terminals and password managers already default that way.</div>
+      </div>
+    </div>
+    <p class="lead" style="margin-top:20px;">The undo is withdrawn the moment you move on — a click, Return, or switching app — because reverting into text you have since edited would do more damage than the original mistake.</p>
+  </section>
+
+  <!-- 12 REALITY -->
+  <section class="slide" id="slide-12">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="chapter-tag"><span class="num">10</span><span>What Live Testing Changed</span></div>
+    <h1 class="headline compact">Two things only real use <span class="accent">could find.</span></h1>
+    <p class="lead">Both passed every unit test and both were obvious within minutes of typing in real apps.</p>
+    <div class="grid-2" style="margin-top: 20px;">
+      <div class="card">
+        <div class="card-title">The single-letter wall <span class="badge">FIXED</span></div>
+        <div class="card-body">
+          <p style="margin:0 0 8px;">"how i did what" came back as:</p>
+          <p style="font-family:'JetBrains Mono',monospace;color:var(--text-mute);margin:0 0 8px;">اخص ه did what</p>
+          The search for where the mistake began stopped at any word the other layout did not clearly improve — and a <strong>one-letter word scores the same in both languages</strong>. The lone "i" tied, became a wall, and stranded everything before it. Single letters are now transparent.
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Watching it type <span class="badge">FIXED</span></div>
+        <div class="card-body">
+          The replacement was correct but <strong>visible</strong> — half a second of erasing one character at a time, during which your own keystrokes were dropped. It read as the machine seizing up mid-sentence.
+          <ul class="bullets compact" style="margin: 10px 0 0;">
+            <li>512 ms → <strong>157 ms</strong> for the same fix</li>
+            <li>Dropped-input window 300 ms → <strong>120 ms</strong></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <p class="lead" style="margin-top:20px;">Deleting stays at 3 ms rather than 0 on purpose: some apps silently swallow keystrokes that arrive too fast, and a swallowed delete leaves <strong>garbage behind</strong> — worse than being slightly slow.</p>
+  </section>
+
+  <!-- 13 LIMITS + CLOSE -->
+  <section class="slide" id="slide-13">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="chapter-tag"><span class="num">11</span><span>Honest Limits</span></div>
+    <h1 class="headline compact">Where it <span class="accent">will not</span> help you.</h1>
+    <p class="lead">Worth knowing before you rely on it.</p>
+    <div class="layer-stack" style="margin-top:16px;">
+      <div class="layer-row">
+        <div class="layer-num">WEBKIT</div>
+        <div><div class="layer-name">Apps whose editor is a WKWebView</div>
+        <div class="layer-desc">They cannot report what is in front of the caret, so fixes are offered rather than applied — until the app is added to <span style="font-family:'JetBrains Mono',monospace;">axVerifySkip</span>. Electron apps like Slack answer fine.</div></div>
+        <div class="layer-tools">per-app<br>opt-in</div>
+      </div>
+      <div class="layer-row">
+        <div class="layer-num">NOT TYPED</div>
+        <div><div class="layer-name">Dictation, paste, autocomplete</div>
+        <div class="layer-desc">Text that never came from a keystroke was never recorded, so there is nothing to re-render.</div></div>
+        <div class="layer-tools">by design</div>
+      </div>
+      <div class="layer-row">
+        <div class="layer-num">TOO SHORT</div>
+        <div><div class="layer-name">Under six letters</div>
+        <div class="layer-desc">Not enough signal to be sure. Offered as a suggestion instead of rewritten.</div></div>
+        <div class="layer-tools">≥ 4 to suggest</div>
+      </div>
+      <div class="layer-row">
+        <div class="layer-num">PRESS ⏎</div>
+        <div><div class="layer-name">Sending before the pause</div>
+        <div class="layer-desc">Return clears the buffer. In a chat box, hitting send immediately always beats the one-second timer.</div></div>
+        <div class="layer-tools">1 s window</div>
+      </div>
+    </div>
+    <p class="lead" style="margin-top:18px;">Everything stays on the machine: <strong>no network code exists in the app</strong>, the word lists ship inside the bundle, and nothing you type is written to disk.</p>
+  </section>
+
+</div>
+
+<nav class="dots" id="dots"></nav>
+
+<script>
+const slides = document.querySelectorAll('.slide');
+const dotsContainer = document.getElementById('dots');
+const counterCurrent = document.querySelector('.counter .current');
+const counterTotal = document.querySelector('.counter .total');
+const total = slides.length;
+let current = 0;
+
+counterTotal.textContent = String(total).padStart(2, '0');
+
+slides.forEach((_, i) => {
+  const dot = document.createElement('button');
+  dot.className = 'dot' + (i === 0 ? ' active' : '');
+  dot.setAttribute('aria-label', `Go to slide ${i + 1}`);
+  dot.addEventListener('click', () => goTo(i));
+  dotsContainer.appendChild(dot);
+});
+const dots = document.querySelectorAll('.dot');
+
+function goTo(index) {
+  if (index < 0 || index >= total || index === current) return;
+  slides[current].classList.remove('active');
+  dots[current].classList.remove('active');
+  current = index;
+  slides[current].classList.add('active');
+  dots[current].classList.add('active');
+  counterCurrent.textContent = String(current + 1).padStart(2, '0');
+  slides[current].scrollTop = 0;
+}
+
+function next() { goTo(current + 1); }
+function prev() { goTo(current - 1); }
+
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  switch (e.key) {
+    case 'ArrowRight': case 'ArrowDown': case 'PageDown': case ' ':
+      e.preventDefault(); next(); break;
+    case 'ArrowLeft': case 'ArrowUp': case 'PageUp':
+      e.preventDefault(); prev(); break;
+    case 'Home': goTo(0); break;
+    case 'End': goTo(total - 1); break;
+    case 'Escape': goTo(0); break;
+  }
+  if (e.key >= '1' && e.key <= '9') goTo(parseInt(e.key) - 1);
+});
+
+document.querySelectorAll('.slide').forEach(slide => {
+  slide.addEventListener('click', (e) => {
+    if (e.target.closest('a, button, input, .dots, table, .card, .formula, .diagram')) return;
+    next();
+  });
+});
+</script>
+
+</body>
+</html>

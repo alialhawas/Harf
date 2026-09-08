@@ -51,6 +51,54 @@ final class SegmenterTests: XCTestCase {
         XCTAssertEqual(region.letterCount, 18)
     }
 
+    /// Regression: a real word of the current language used to end the region.
+    ///
+    /// Typing "what is pr dojs" on the Arabic layout produces
+    /// "صاشف هس حق يختس", and حق is a genuine Arabic word. Treating it as the
+    /// boundary of deliberate typing left three quarters of one English
+    /// sentence unconverted and offered only the trailing token, which at four
+    /// letters was too short to act on. The region-level comparison has to
+    /// reach past it.
+    func testARealWordOfTheCurrentLanguageDoesNotStrandTheRestOfTheRun() throws {
+        let fixture = try DetectorFixture.make()
+        let keys = try fixture.arabicKeys("صاشف هس حق يختس")
+        let region = try XCTUnwrap(fixture.segment(keys, typedLanguage: .arabic))
+
+        XCTAssertEqual(region.typedText, "صاشف هس حق يختس")
+        XCTAssertEqual(region.tokenCount, 4)
+    }
+
+    /// The other half: reaching past a word has to cost something.
+    ///
+    /// Here the trailing token already reads perfectly under the other layout,
+    /// so dragging real current-language text into the region can only make it
+    /// worse, and the region stays where the walk put it.
+    func testAStrongWordOfTheCurrentLanguageStillBoundsTheRegion() throws {
+        let fixture = try DetectorFixture.make()
+        let keys = try fixture.latinKeys("HSMDIH ha HGDML HSMDIH")
+        let region = try XCTUnwrap(fixture.segment(keys))
+
+        XCTAssertEqual(region.typedText, "HGDML HSMDIH")
+    }
+
+    /// Regression: the walk refused to start when the last token was a word.
+    ///
+    /// The walk reads right to left from the caret, so a real word of the
+    /// language on screen in the *final* position stopped it on the first step
+    /// and nothing was ever accepted. "now i can merged ths dev to main" typed
+    /// on the Arabic layout ends in وشهر, which strips to شهر — "month" — and
+    /// the whole sentence was passed over.
+    func testARealWordInTheFinalPositionDoesNotSuppressTheWholeRun() throws {
+        let fixture = try DetectorFixture.make()
+        let keys = try fixture.arabicKeys("رخص ه ذشر وثقلثي فاس يثد فخ وشهر")
+        let region = try XCTUnwrap(fixture.segment(keys, typedLanguage: .arabic))
+
+        XCTAssertTrue(
+            region.typedText.hasSuffix("وشهر"),
+            "the region has to reach the caret, got \(region.typedText)")
+        XCTAssertGreaterThanOrEqual(region.tokenCount, 6)
+    }
+
     func testPureEnglishBufferHasNoCandidate() throws {
         let fixture = try DetectorFixture.make()
         for text in [
@@ -137,4 +185,46 @@ final class SegmenterTests: XCTestCase {
         let region = try XCTUnwrap(fixture.segment(keys))
         XCTAssertEqual(region.typedText, "hkh hsmdih")
     }
+
+    /// Regression: an accidental token that parses as valid morphology of the
+    /// language on screen used to collapse the region to nothing usable.
+    ///
+    /// "how we trun it" typed on the Arabic layout gives اخص صث فقعر هف. فقعر
+    /// is not in the dictionary, but stripping its ف clitic leaves قعر —
+    /// "depth" — so it reads as real Arabic and walled the walk off. The
+    /// region became هف alone: two letters, discarded for being too short,
+    /// and nothing was offered for a sentence that is plainly English.
+    func testAnAccidentalRealWordDoesNotCollapseTheRegion() throws {
+        let fixture = try DetectorFixture.make()
+        let keys = try fixture.arabicKeys("اخص صث فقعر هف")
+        let region = try XCTUnwrap(fixture.segment(keys, typedLanguage: .arabic))
+
+        XCTAssertEqual(region.typedText, "اخص صث فقعر هف")
+        XCTAssertEqual(region.tokenCount, 4)
+    }
+
+    /// The counting that makes the case above work, stated directly: three
+    /// tokens for English against the one accident. Averaging the same run
+    /// yields a 0.32 separation, which no auto rule accepts.
+    func testTheTallyCountsTokensRatherThanAveragingThem() throws {
+        let fixture = try DetectorFixture.make()
+        let keys = try fixture.arabicKeys("اخص صث فقعر هف")
+        let region = try XCTUnwrap(fixture.segment(keys, typedLanguage: .arabic))
+
+        XCTAssertEqual(region.alternateVotes, 3)
+        XCTAssertEqual(region.currentVotes, 1)
+    }
+
+    /// The limit on that rule. A majority may reach past a word only when the
+    /// word could plausibly have been produced by the wrong layout. "report"
+    /// renders to قثحخقف, which scores zero as Arabic, so it bounds the region
+    /// however many gibberish tokens surround it — here four against one.
+    func testAMajorityDoesNotReachPastADeliberateWord() throws {
+        let fixture = try DetectorFixture.make()
+        let keys = try fixture.latinKeys("hkh hsmdih report hkh hsmdih")
+        let region = try XCTUnwrap(fixture.segment(keys))
+
+        XCTAssertEqual(region.typedText, "hkh hsmdih")
+    }
+
 }

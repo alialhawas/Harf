@@ -58,12 +58,31 @@ final class TypingPipeline {
     /// the caret no longer matches or the field turned out to be secure.
     /// Silence there would look exactly like a broken key.
     var onRequestRejected: (() -> Void)?
+    /// Words that just crossed into the dictionary, the language they belong
+    /// to, and the app that was in front. Main thread.
+    var onWordsLearned: (([String], Language, pid_t?) -> Void)?
+    /// A flip the user asked for by name that reached the screen, and the app
+    /// it went into. Main thread.
+    ///
+    /// Separate from `onAutoApply`, which is also called for a flip: that one
+    /// is the record of a fix — the `Last fix` line, the flash — while this
+    /// one carries the `Flip` itself, which is what the card needs to show the
+    /// text and to offer learning it.
+    var onFlipApplied: ((Flip, pid_t?) -> Void)?
 
     /// Shared, cached view of the enabled keyboard layouts. Owned here because
     /// this is where the invalidation notification is observed.
     let layoutEngine = LayoutEngine()
 
     private let session: TypingSession
+    /// This user's own vocabulary. One instance, shared by both language
+    /// models, so a word learned in English is not credited to Arabic.
+    ///
+    /// Injected rather than constructed here because the settings window shows
+    /// and edits the same words. Two instances over one file would each hold a
+    /// stale copy of the other's writes, and the last one to save would win.
+    let lexicon: UserLexicon
+
     private let fixEngine: FixApplying
     private let settings: SettingsStore
     private let frontmost: FrontmostAppTracker
@@ -76,6 +95,9 @@ final class TypingPipeline {
     private let focus: FocusInspecting
     /// Written by the panel controller, read here and on the tap thread.
     private let suggestionState: SuggestionState
+    /// The rectangles of Harf's own cards, so a click on one is not counted as
+    /// input. Written by the card controllers on the main thread, read here.
+    private let cardFrames: CardFrames
 
     /// Queue-confined state.
     private var pendingEvaluation: DispatchWorkItem?
@@ -143,13 +165,17 @@ final class TypingPipeline {
         frontmost: FrontmostAppTracker,
         secureInput: SecureInputReading,
         suggestionState: SuggestionState,
+        cardFrames: CardFrames,
+        lexicon: UserLexicon? = nil,
         fixEngine: FixApplying? = nil,
         focus: FocusInspecting? = nil
     ) {
+        self.lexicon = lexicon ?? UserLexicon(url: UserLexicon.defaultURL())
         self.settings = settings
         self.frontmost = frontmost
         self.secureInput = secureInput
         self.suggestionState = suggestionState
+        self.cardFrames = cardFrames
         self.paused = settings.paused
         self.secureInputActive = secureInput.isEnabled
         frontmostPolicy = settings.policy(for: frontmost.bundleID)
@@ -270,6 +296,13 @@ final class TypingPipeline {
                 self.paused = updated.paused
             }
 
+            // How much is held, and for how long, are privacy controls: apply
+            // them before anything else, and to the buffer as it already
+            // stands rather than only to what arrives next.
+            self.session.setBufferCapacity(updated.bufferCapacity)
+            self.session.idleTimeout = updated.idleTimeout
+            if !updated.learnVocabulary { self.lexicon.clear() }
+
             let policy = updated.policy(for: self.session.currentFrontmostBundleID)
             if policy == .off, self.frontmostPolicy != .off {
                 self.suspend(reason: .manual, describedAs: "this app was set to Off")
@@ -308,6 +341,16 @@ final class TypingPipeline {
             process(.key(key))
 
         case .mouseDown(let location, let primaryButton):
+            // A click on one of Harf's own cards is not input. The ordinary
+            // mouse-down path bumps the input serial and ends the undo window,
+            // so routing a press of the learned card's Undo button through it
+            // would throw away the ⌘⌥Z slot that button exists to use. The
+            // card's own handler still gets the click through its panel.
+            //
+            // The suggestion card is not in here on purpose: its clicks must
+            // reach `mouseDisposition` below, which turns one into an accept.
+            if cardFrames.contains(location) { return }
+
             // A click on the card is the second way to accept, and it must not
             // be treated as input first: the ordinary mouse-down path bumps the
             // input serial, which would make the acceptance it is *part of*
@@ -472,6 +515,45 @@ final class TypingPipeline {
 
     // MARK: - Evaluation
 
+    /// Counts the words of a run the detector examined and left alone.
+    ///
+    /// "Left alone" is the whole safeguard. It means the detector rendered the
+    /// keys under both layouts, scored them, and concluded the text already
+    /// reads as the language it is in — which is the only moment the app has
+    /// grounds to treat those words as this person's vocabulary rather than as
+    /// something waiting to be corrected. A run that produced a candidate is
+    /// never counted, however it was resolved, so wrong-layout text cannot
+    /// teach itself into the dictionary.
+    private func learnVocabulary(from detection: Detector.Detection, using detector: Detector) {
+        guard settings.learnVocabulary else { return }
+        guard case .ignore = detection.decision, detection.region == nil else { return }
+        let model = detector.model(for: detection.typedLanguage)
+        let text = session.currentText
+        guard !text.isEmpty else { return }
+        // Only words the shipped list does not already have.
+        //
+        // Counting everything meant the file filled with "the", "and" and
+        // "create" — words that were already known, so learning them changed
+        // no score, while the counts amounted to a frequency profile of
+        // ordinary writing sitting on disk. The gap this exists to close is
+        // the vocabulary the subtitle corpus lacks, so that is all it records:
+        // what is missing, and how often it is used.
+        let unknown = model.vocabulary(in: text).filter { !model.isKnownWord($0) }
+        guard !unknown.isEmpty else { return }
+        let promoted = lexicon.observe(unknown, language: detection.typedLanguage)
+        lexicon.saveIfDue()
+
+        // A crossing changes how everything after it scores, and it is the one
+        // thing here that outlives the session. Saying so is the difference
+        // between a dictionary the user owns and one that happens to them.
+        guard !promoted.isEmpty else { return }
+        let language = detection.typedLanguage
+        let pid = frontmost.current.processIdentifier
+        DispatchQueue.main.async { [weak self] in
+            self?.onWordsLearned?(promoted, language, pid)
+        }
+    }
+
     private func evaluate() {
         dispatchPrecondition(condition: .onQueue(queue))
 
@@ -510,15 +592,20 @@ final class TypingPipeline {
         }
 
         let detector = Detector(englishLayout: pair.english, arabicLayout: pair.arabic)
+        detector.englishModel.lexicon = lexicon
+        detector.arabicModel.lexicon = lexicon
         let started = Self.now()
         // Step (b), second half: `suggestOnly` is capped inside the decision
         // function, which is the one place that reads `AppPolicy`.
         guard
             let detection = session.evaluate(
                 detector: detector, policy: policy, aggressiveness: settings.aggressiveness,
+                confidentScore: settings.confidentScore,
                 recentlyUndone: undoSuppression.texts(bundleID: bundleID, at: now))
         else { return }
         let duration = Self.now() - started
+
+        learnVocabulary(from: detection, using: detector)
 
         let snapshot = DecisionSnapshot(
             detection: detection, policy: policy, bundleID: bundleID, duration: duration,
@@ -543,7 +630,7 @@ final class TypingPipeline {
         // The one interpolation in the project that is deliberately public:
         // redacting it would make the opt-in flag pointless.
         Log.decision.info(
-            "\(snapshot.verdict, privacy: .public) region=\(snapshot.regionText, privacy: .public) cur=\(snapshot.currentScore, format: .fixed(precision: 2), privacy: .public) alt=\(snapshot.alternateScore, format: .fixed(precision: 2), privacy: .public) guards=\(snapshot.guards, privacy: .public) reason=\(snapshot.reason, privacy: .public) in \(snapshot.durationMillis, format: .fixed(precision: 1), privacy: .public) ms"
+            "\(snapshot.verdict, privacy: .public) region=\(snapshot.regionText, privacy: .private) cur=\(snapshot.currentScore, format: .fixed(precision: 2), privacy: .public) alt=\(snapshot.alternateScore, format: .fixed(precision: 2), privacy: .public) guards=\(snapshot.guards, privacy: .public) reason=\(snapshot.reason, privacy: .public) in \(snapshot.durationMillis, format: .fixed(precision: 1), privacy: .public) ms"
         )
     }
 
@@ -998,26 +1085,416 @@ final class TypingPipeline {
         }
     }
 
+    // MARK: - Flipping
+
+    /// Rewrites the selection — or, when nothing is selected, the typed run —
+    /// through the other keyboard layout.
+    ///
+    /// Callable from any thread: the hot key and the menu item both arrive on
+    /// the main one. Same shape as `undoLastFix()`.
+    func flipSelection() {
+        queue.async { [weak self] in
+            self?.beginFlip()
+        }
+    }
+
+    /// Whether a flip asked for right now would actually be attempted.
+    ///
+    /// Mirrors `canUndo()` minus the history check — there is no slot to
+    /// consult, the command stands on its own — and is used for the same
+    /// reason: a menu item that is enabled and then answers with a ✕ is worse
+    /// than one that is greyed out. Safe from the main thread: no work on this
+    /// queue ever waits on the main one.
+    func canFlip() -> Bool {
+        queue.sync { captureActive && !isSuppressed && !isApplying && !isGating }
+    }
+
+    private func beginFlip() {
+        dispatchPrecondition(condition: .onQueue(queue))
+
+        guard captureActive, !isSuppressed, !isApplying, !isGating else {
+            // The user pressed a chord. Silence would look exactly like a
+            // broken key, so the refusal is shown even though there is nothing
+            // to be done about it.
+            Log.fix.info("flip refused: the pipeline is busy or suspended")
+            onRequestRejected?()
+            return
+        }
+
+        // The session's view of what is in front, exactly as `evaluate()`
+        // takes it: it is the identifier the policy, the buffer and the
+        // suppression tables are all keyed by, so reading a fresher one here
+        // would apply this app's rules under that app's name.
+        //
+        // Never `frontmost.currentBundleID()`, tempting as an authoritative
+        // read is: that one hops to the main thread with `sync`, and the menu
+        // asks `canFlip()` and `canUndo()` with `queue.sync` *from* the main
+        // thread. The two together are a deadlock.
+        let bundleID = session.currentFrontmostBundleID
+        switch SafetyGate.preflight(
+            paused: paused,
+            secureInputEnabled: secureInputActive || secureInput.readNow(),
+            policy: settings.policy(for: bundleID))
+        {
+        case .blocked(let reason, let reset):
+            if let reset { resetBuffer(reason: reset) }
+            Log.fix.info("flip refused: \(reason, privacy: .public)")
+            onRequestRejected?()
+            return
+        case .proceed:
+            // The allowed policy is deliberately discarded. `.suggestOnly`
+            // caps what the *detector* may do unasked; this is the user naming
+            // the command, and the only policy that refuses that is `.off`,
+            // which preflight has already blocked.
+            break
+        }
+
+        guard let pair = (layoutPair ?? layoutEngine.cachedPair)() else {
+            // Same rule as `evaluate()`: a cold cache is repopulated on the
+            // main thread after every invalidation, and enumerating input
+            // sources from here is a Text Input Sources call off-main.
+            Log.fix.info("flip refused: the layout cache is cold")
+            onRequestRejected?()
+            return
+        }
+
+        // A card on screen is about text that is about to change underneath
+        // it, and nothing else takes it down: the tap swallows the flip chord,
+        // so `process` never runs for it. Left up, its stale fix could then be
+        // accepted on top of the flipped text. Not remembered as a refusal —
+        // the user was not answering the card.
+        dismissSuggestion("a flip was requested", remember: false)
+        inputs.bump()
+
+        isGating = true
+        cancelTrigger()
+        let serial = inputs.current
+        // The pid, unlike the identifier, comes from the tracker: it is what
+        // the accessibility calls are addressed to, and a stale one asks a
+        // process that no longer has focus. Same split as `beginGate`.
+        let pid = frontmost.current.processIdentifier
+
+        // The focused element is asked about first and for nothing but its
+        // security, because the answer decides whether the application may be
+        // asked anything else at all.
+        focus.inspect(pid: pid, caretTextLength: nil) { [weak self] inspected in
+            guard let self else { return }
+            self.queue.async {
+                guard self.continueFlip(serial: serial, describedAs: "the focus check") else {
+                    return
+                }
+                // Before any selection is read and before ⌘C is ever posted:
+                // putting a password field's selection on the pasteboard is
+                // itself the leak, which is why this cannot wait for
+                // `SafetyGate.resolve` at the end of the chain.
+                guard SafetyGate.allowsExplicitCommand(secureField: inspected.security) else {
+                    self.isGating = false
+                    Log.fix.info("flip refused: the focused field is a password field")
+                    self.resetBuffer(reason: .secureInput)
+                    self.onRequestRejected?()
+                    return
+                }
+                self.readSelectionForFlip(
+                    pid: pid, pair: pair, security: inspected.security, bundleID: bundleID,
+                    serial: serial)
+            }
+        }
+    }
+
+    /// The two guards every hop of the flip repeats.
+    ///
+    /// Returns false when the flip is over: either something else claimed the
+    /// gate, or input arrived while an application was being asked something,
+    /// which means the text the flip is about has moved.
+    private func continueFlip(serial: UInt64, describedAs stage: String) -> Bool {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard isGating else { return false }
+        guard !inputs.hasMoved(since: serial) else {
+            isGating = false
+            Log.fix.info("flip abandoned: input arrived during \(stage, privacy: .public)")
+            // The keystroke that abandoned this arrived while `isGating` was
+            // set, so its own `armTrigger` was swallowed by the guard there.
+            // Same re-arm, and same reason, as the other abandon paths.
+            if !session.isBufferEmpty { armTrigger() }
+            return false
+        }
+        return true
+    }
+
+    private func readSelectionForFlip(
+        pid: pid_t?,
+        pair: (english: KeyboardLayout, arabic: KeyboardLayout),
+        security: SecureFieldState,
+        bundleID: String?,
+        serial: UInt64
+    ) {
+        dispatchPrecondition(condition: .onQueue(queue))
+
+        focus.selectedText(pid: pid) { [weak self] read in
+            guard let self else { return }
+            self.queue.async {
+                guard self.continueFlip(serial: serial, describedAs: "the selection read") else {
+                    return
+                }
+                switch read {
+                case .selected(let text):
+                    self.resolveFlipText(
+                        text, overSelection: true, pair: pair, security: security,
+                        bundleID: bundleID, pid: pid, serial: serial)
+
+                case .unreadable:
+                    // The element exposes no text surface — a terminal, a
+                    // canvas-drawn web view — so accessibility cannot say
+                    // whether anything is selected. ⌘C is the only way left to
+                    // ask, and it costs the better part of a second, which is
+                    // why it is spent here and nowhere else.
+                    self.copySelectionForFlip(
+                        pair: pair, security: security, bundleID: bundleID, pid: pid,
+                        serial: serial)
+
+                case .noSelection, .unavailable:
+                    self.flipTypedRun(
+                        pair: pair, security: security, bundleID: bundleID, pid: pid,
+                        serial: serial)
+                }
+            }
+        }
+    }
+
+    private func copySelectionForFlip(
+        pair: (english: KeyboardLayout, arabic: KeyboardLayout),
+        security: SecureFieldState,
+        bundleID: String?,
+        pid: pid_t?,
+        serial: UInt64
+    ) {
+        dispatchPrecondition(condition: .onQueue(queue))
+
+        fixEngine.copySelection(in: bundleID) { [weak self] result in
+            guard let self else { return }
+            self.queue.async {
+                guard self.continueFlip(serial: serial, describedAs: "the copy") else { return }
+                switch result {
+                case .copied(let text):
+                    self.resolveFlipText(
+                        text, overSelection: true, pair: pair, security: security,
+                        bundleID: bundleID, pid: pid, serial: serial)
+
+                case .noSelection:
+                    self.flipTypedRun(
+                        pair: pair, security: security, bundleID: bundleID, pid: pid,
+                        serial: serial)
+
+                case .couldNotTry(let error):
+                    // "The question could not be asked" is not "there is
+                    // nothing selected". Falling back to the typed run here
+                    // would rewrite a completely different span of the
+                    // document from the one the user meant.
+                    self.isGating = false
+                    Log.fix.info(
+                        "flip refused: the selection could not be read (\(error.description, privacy: .public))"
+                    )
+                    self.onRequestRejected?()
+                }
+            }
+        }
+    }
+
+    /// Nothing is selected, so the flip is about what the user has just typed.
+    private func flipTypedRun(
+        pair: (english: KeyboardLayout, arabic: KeyboardLayout),
+        security: SecureFieldState,
+        bundleID: String?,
+        pid: pid_t?,
+        serial: UInt64
+    ) {
+        dispatchPrecondition(condition: .onQueue(queue))
+
+        let text = session.currentText
+        guard !text.isEmpty else {
+            isGating = false
+            // Nothing selected and nothing typed. The flip chord is global,
+            // and most presses of it in that state are meant for the
+            // application underneath, so this is silent for exactly the reason
+            // ⌘⌥Z with nothing to undo is.
+            Log.fix.debug("flip requested with nothing selected and an empty buffer")
+            return
+        }
+        resolveFlipText(
+            text, overSelection: false, pair: pair, security: security, bundleID: bundleID,
+            pid: pid, serial: serial)
+    }
+
+    private func resolveFlipText(
+        _ text: String,
+        overSelection: Bool,
+        pair: (english: KeyboardLayout, arabic: KeyboardLayout),
+        security: SecureFieldState,
+        bundleID: String?,
+        pid: pid_t?,
+        serial: UInt64
+    ) {
+        dispatchPrecondition(condition: .onQueue(queue))
+
+        guard let flip = FlipBuilder.flip(text, english: pair.english, arabic: pair.arabic) else {
+            // There *was* text — a selection, or a typed run — so the user has
+            // every reason to expect something to happen. Silence would read
+            // as a dead key rather than as "this text does not flip".
+            isGating = false
+            Log.fix.info("flip refused: nothing in the text maps to the other layout")
+            onRequestRejected?()
+            return
+        }
+
+        // The typed-run path deletes cluster by cluster from the caret, and
+        // the buffer it counts those clusters from is capped. A longer run is
+        // one the buffer never held in full, so the delete burst would stop
+        // short and leave a hybrid of both layouts on screen.
+        if !overSelection, flip.original.count > TypedBuffer.maximumCapacity {
+            isGating = false
+            Log.fix.info("flip refused: the run is longer than the buffer can hold")
+            onRequestRejected?()
+            return
+        }
+
+        // `deleteCount == replacedText.count` holds by construction, which is
+        // what makes `Fix.inverted` — and so ⌘⌥Z after a flip — correct.
+        let fix = Fix(
+            deleteCount: flip.original.count,
+            insertText: flip.flipped,
+            targetLayoutID: flip.targetLayoutID,
+            sourceLayoutID: flip.sourceLayoutID,
+            replacedText: flip.original,
+            capsMode: flip.capsMode)
+
+        guard overSelection else {
+            verifyThenFlipTypedRun(
+                flip, fix: fix, bundleID: bundleID, pid: pid, serial: serial)
+            return
+        }
+
+        isGating = false
+        // `.proceed` rather than a caret verdict, and this is the one place
+        // that is right: a live selection is precisely the state
+        // `CaretVerification` fails closed on (`.selectionPresent`), because
+        // there it is evidence of something the buffer cannot see. Here the
+        // selection *is* the span being replaced, it was read back
+        // character for character, and typing over it deletes exactly it.
+        switch SafetyGate.resolve(
+            decision: .autoApply(fix), secureField: security, verification: .proceed)
+        {
+        case .autoApply:
+            beginApply(
+                fix, bundleID: bundleID, verifiedAt: serial,
+                kind: .flip(flip, overSelection: true))
+
+        case .drop(let reason):
+            Log.fix.info("flip dropped: \(reason, privacy: .public)")
+            resetBuffer(reason: .secureInput)
+            onRequestRejected?()
+
+        case .suggest(let downgradedFrom):
+            Log.fix.info(
+                "flip refused: \(downgradedFrom ?? "the caret could not be verified", privacy: .public)"
+            )
+            onRequestRejected?()
+
+        case .nothing:
+            break
+        }
+    }
+
+    /// The typed-run flip's own gate: it is the only explicit command that
+    /// deletes text the user never pointed at.
+    private func verifyThenFlipTypedRun(
+        _ flip: Flip, fix: Fix, bundleID: String?, pid: pid_t?, serial: UInt64
+    ) {
+        dispatchPrecondition(condition: .onQueue(queue))
+
+        guard !settings.skipsAXVerify(bundleID) else {
+            // The skip list trades the caret check away for applications that
+            // cannot answer it. That trade is acceptable where the user
+            // pointed at the text — a selection, an offer, an undo — and not
+            // here, where the span is inferred from the buffer alone.
+            isGating = false
+            Log.fix.info("flip refused: the caret cannot be verified in this app")
+            onRequestRejected?()
+            return
+        }
+
+        focus.inspect(pid: pid, caretTextLength: fix.replacedText.utf16.count) {
+            [weak self] inspected in
+            guard let self else { return }
+            self.queue.async {
+                guard self.continueFlip(serial: serial, describedAs: "the caret check") else {
+                    return
+                }
+                self.isGating = false
+
+                // `.required`, not `.bestEffort`: this path deletes up to the
+                // whole buffer — text the user named a command for, not text
+                // they put a cursor in — so an element that exposes nothing is
+                // not reason enough. Only a positive match may proceed.
+                let verification = CaretVerification.verdict(
+                    read: inspected.caretRead, replacedText: fix.replacedText, mode: .required)
+
+                switch SafetyGate.resolve(
+                    decision: .autoApply(fix), secureField: inspected.security,
+                    verification: verification)
+                {
+                case .autoApply:
+                    self.beginApply(
+                        fix, bundleID: bundleID, verifiedAt: serial,
+                        kind: .flip(flip, overSelection: false))
+
+                case .drop(let reason):
+                    Log.fix.info("flip dropped: \(reason, privacy: .public)")
+                    self.resetBuffer(reason: .secureInput)
+                    self.onRequestRejected?()
+
+                case .suggest(let downgradedFrom):
+                    Log.fix.info(
+                        "flip refused: \(downgradedFrom ?? "the caret could not be verified", privacy: .public)"
+                    )
+                    self.onRequestRejected?()
+
+                case .nothing:
+                    break
+                }
+            }
+        }
+    }
+
     // MARK: - Applying
 
-    /// Which of the three ways a fix can reach the screen this is.
+    /// Which of the ways a fix can reach the screen this is.
     ///
-    /// The sequence, its guards and its aftermath are identical for all three
-    /// by design — that is the whole reason undo goes through here rather than
-    /// down a path of its own. What differs is only what is recorded and what
-    /// the user is shown afterwards.
+    /// The sequence, its guards and its aftermath are identical for all of
+    /// them by design — that is the whole reason undo goes through here rather
+    /// than down a path of its own. What differs is only what is recorded and
+    /// what the user is shown afterwards.
     private enum ApplyKind {
         case auto
         case accepted
         /// The inverse of `original`, which has already been claimed out of the
         /// undo slot and is put back if this never reaches the screen.
         case undo(original: AppliedFix)
+        /// A flip the user asked for by name.
+        ///
+        /// `overSelection` chooses the injector call, and it has to: typing
+        /// over a selection replaces it, so the forward `Fix` must never reach
+        /// `FixEngine.apply`, whose `deleteCount` backspaces would be posted
+        /// *after* the replacement had already consumed the selected span —
+        /// eating that many clusters of whatever preceded it.
+        case flip(Flip, overSelection: Bool)
 
         var description: String {
             switch self {
             case .auto: return "auto-applying"
             case .accepted: return "applying an accepted suggestion"
             case .undo: return "undoing"
+            case .flip(_, let overSelection):
+                return overSelection ? "flipping a selection" : "flipping the typed run"
             }
         }
     }
@@ -1036,21 +1513,36 @@ final class TypingPipeline {
         // this synchronously, in the same queue block, so it is the same value
         // and one fewer parameter to keep in step across three call sites.
         let userSerial = userInputs.current
-        Log.fix.info(
-            "\(kind.description, privacy: .public): delete \(fix.deleteCount, privacy: .public) clusters, insert \(fix.insertText.count, privacy: .public), switch to \(fix.targetLayoutID, privacy: .public)"
-        )
 
         let inputs = self.inputs
-        fixEngine.apply(
-            fix,
-            in: bundleID,
-            isStale: { inputs.hasMoved(since: verifiedAt) }
-        ) { [weak self] result in
+        let isStale = { inputs.hasMoved(since: verifiedAt) }
+        let completion: (Result<FixProgress, FixFailure>) -> Void = { [weak self] result in
             guard let self else { return }
             self.queue.async {
                 self.finishApply(
                     fix, bundleID: bundleID, kind: kind, userSerial: userSerial, result: result)
             }
+        }
+
+        if case .flip(let flip, overSelection: true) = kind {
+            // Nothing is deleted: the selection is still there, and typing
+            // replaces it. Logged as such, because a line claiming a delete
+            // count that was never posted is a line that sends the next reader
+            // hunting for backspaces in the wrong place.
+            Log.fix.info(
+                "\(kind.description, privacy: .public): type \(flip.flipped.count, privacy: .public) over the selection, switch to \(fix.targetLayoutID, privacy: .public)"
+            )
+            fixEngine.replaceSelection(
+                with: flip.flipped,
+                targetLayoutID: flip.targetLayoutID,
+                in: bundleID,
+                isStale: isStale,
+                completion: completion)
+        } else {
+            Log.fix.info(
+                "\(kind.description, privacy: .public): delete \(fix.deleteCount, privacy: .public) clusters, insert \(fix.insertText.count, privacy: .public), switch to \(fix.targetLayoutID, privacy: .public)"
+            )
+            fixEngine.apply(fix, in: bundleID, isStale: isStale, completion: completion)
         }
     }
 
@@ -1091,6 +1583,47 @@ final class TypingPipeline {
                     text: original.fix.replacedText, bundleID: bundleID, at: Self.now())
                 lastDecision?.result = "undone"
                 onUndoApplied?()
+            case .flip(let flip, let overSelection):
+                guard overSelection, !settings.skipsAXVerify(bundleID) else {
+                    // A typed-run flip verified the caret before it deleted
+                    // anything, and an app on the skip list has already been
+                    // declared unable to answer. Neither is asked again.
+                    recordFlip(
+                        flip, fix: fix, bundleID: bundleID, userSerial: userSerial,
+                        droppedInput: droppedInputDuringApply)
+                    break
+                }
+                // Read now, before the hop: input arriving during the check
+                // says nothing about whether the flip itself landed, and the
+                // undo offer is a question about the moment the burst ended.
+                let droppedInput = droppedInputDuringApply
+                focus.inspect(
+                    pid: frontmost.current.processIdentifier,
+                    caretTextLength: flip.flipped.utf16.count
+                ) { [weak self] inspected in
+                    guard let self else { return }
+                    self.queue.async {
+                        if self.flipLanded(flip, read: inspected.caretRead) {
+                            self.recordFlip(
+                                flip, fix: fix, bundleID: bundleID, userSerial: userSerial,
+                                droppedInput: droppedInput)
+                        } else {
+                            // The injector reported success and the text is
+                            // not there. Something else consumed the
+                            // keystrokes, so nothing is recorded: an undo slot
+                            // armed here would post backspaces over whatever
+                            // is actually in front of the caret.
+                            Log.fix.fault(
+                                "the flipped text is not in front of the caret; no undo is offered")
+                            self.lastDecision?.result = "flip unverified"
+                            self.onRequestRejected?()
+                        }
+                        self.completeApply(progress: succeeded, transientFailure: false)
+                    }
+                }
+                // The aftermath runs in that callback instead, so that it runs
+                // exactly once and after the check rather than racing it.
+                return
             }
         case .failure(let failure):
             progress = failure.progress
@@ -1104,7 +1637,86 @@ final class TypingPipeline {
                 // destructive pass over that is not something to offer.
                 history.restore(original)
             }
+            if case .flip = kind {
+                // Unlike an auto-apply, this one was asked for by name, and a
+                // command that quietly does nothing reads as a broken key.
+                onRequestRejected?()
+            }
         }
+        completeApply(progress: progress, transientFailure: transientFailure)
+    }
+
+    /// What a flip left in front of the caret, checked before an undo for it
+    /// is armed.
+    ///
+    /// A selection flip is the one apply whose delete half is performed by the
+    /// application rather than by us: we type, and the app is supposed to
+    /// replace the highlighted span. An app that had already dropped the
+    /// selection puts the text somewhere else entirely, and the injector
+    /// cannot tell — it posted its keys and they were accepted. Recording an
+    /// undo for that would arm a delete burst over text nobody has seen.
+    ///
+    /// The comparison is over UTF-16 with no normalisation, for the reason
+    /// `CaretVerification` gives.
+    private func flipLanded(_ flip: Flip, read: CaretRead) -> Bool {
+        // Every other read — an element that exposes no text, a live
+        // selection, no answer at all — saw nothing either way, and the
+        // injector reported success. Only a reading that positively disagrees
+        // counts against it.
+        guard case .value = read else { return true }
+        // The same comparison the automatic path trusts before it deletes,
+        // partial-match rule included. A terminal reports only its visible
+        // line, so the read-back can be shorter than the flip and still agree
+        // with it; refusing an undo for that would take ⌘⌥Z away precisely
+        // where a flip that went wrong needs it most.
+        if case .proceed = CaretVerification.verdict(
+            read: read, replacedText: flip.flipped, mode: .required)
+        {
+            return true
+        }
+        return false
+    }
+
+    private func recordFlip(
+        _ flip: Flip, fix: Fix, bundleID: String?, userSerial: UInt64, droppedInput: Bool
+    ) {
+        dispatchPrecondition(condition: .onQueue(queue))
+
+        let applied = AppliedFix(
+            fix: fix, appliedAt: Date(), bundleID: bundleID, userInputSerial: userSerial)
+        if droppedInput {
+            // Same reasoning as the automatic path: what is in front of the
+            // caret is the flip followed by something this app never saw, and
+            // an undo counts its backspaces from the caret.
+            Log.fix.info("no undo offered: input arrived while the flip was being applied")
+        } else {
+            history.record(applied)
+        }
+        // The flipped text reads as the other language now, so the next quiet
+        // period would look straight at what was flipped *from* and offer to
+        // put it back. Held down for the same minute a refusal is.
+        undoSuppression.record(text: flip.original, bundleID: bundleID, at: Self.now())
+        lastDecision?.result = "flipped"
+        // The flash and the `Last fix` line come from the same callback every
+        // other fix uses; only the card is particular to a flip.
+        onAutoApply?(applied)
+        let pid = frontmost.current.processIdentifier
+        DispatchQueue.main.async { [weak self] in
+            self?.onFlipApplied?(flip, pid)
+        }
+    }
+
+    /// The half of an apply that runs whatever the outcome was: publish the
+    /// decision, decide what becomes of the buffer, and close the window in
+    /// which input is ignored.
+    ///
+    /// Split out because a selection flip reaches it one accessibility hop
+    /// later than everything else. Running it twice would re-arm the trigger
+    /// against a buffer already reset; not running it at all would leave
+    /// `isApplying` set for good, and with it the whole pipeline.
+    private func completeApply(progress: FixProgress, transientFailure: Bool) {
+        dispatchPrecondition(condition: .onQueue(queue))
+
         if let lastDecision { onDecision?(lastDecision) }
 
         let aftermath = ApplyAftermath.decide(
@@ -1160,6 +1772,16 @@ final class TypingPipeline {
     }
 
     // MARK: - Seams for DodomaAppTests
+
+    /// Where a flip gets the layout pair it renders through. Nil — the normal
+    /// case — means the shared cache, warmed on the main thread.
+    ///
+    /// A test cannot use that cache: it is populated from the input sources
+    /// enabled on whichever machine happens to be running the suite, so a
+    /// machine without Arabic enabled would silently turn every flip test into
+    /// a test of the cold-cache refusal. The committed `uchr` fixtures go in
+    /// here instead.
+    var layoutPair: (() -> (english: KeyboardLayout, arabic: KeyboardLayout)?)?
 
     /// Raises an offer for `fix` as though the detector had just produced one.
     /// Queue-confined.

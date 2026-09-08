@@ -283,7 +283,7 @@ final class TypingSessionTests: XCTestCase {
         }
 
         let snapshot = session.snapshot(at: 200)
-        XCTAssertEqual(snapshot.keyCount, TypedBuffer.capacity)
-        XCTAssertEqual(snapshot.text.count, TypedBuffer.capacity)
+        XCTAssertEqual(snapshot.keyCount, TypedBuffer.defaultCapacity)
+        XCTAssertEqual(snapshot.text.count, TypedBuffer.defaultCapacity)
     }
 }

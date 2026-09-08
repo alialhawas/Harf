@@ -75,13 +75,25 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false)
-        window.title = "Welcome to Dodoma"
+        window.title = "Welcome to Harf"
         window.isReleasedWhenClosed = false
         window.delegate = self
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.isMovableByWindowBackground = true
+        window.backgroundColor = NSColor(red: 0.043, green: 0.055, blue: 0.075, alpha: 1)
+        window.appearance = NSAppearance(named: .darkAqua)
         window.contentView = NSHostingView(
-            rootView: OnboardingView(
-                model: model,
-                onDone: { [weak self] in self?.finish() }))
+            rootView: ZStack {
+                DodomaTheme.canvas
+                GravityStarsBackground(
+                    starCount: 110, starSize: 2.4, starOpacity: 0.85,
+                    starColor: Color(red: 0.87, green: 0.95, blue: 0.98))
+                OnboardingView(
+                    model: model,
+                    onDone: { [weak self] in self?.finish() })
+            }
+            .preferredColorScheme(.dark))
         window.center()
         return window
     }
@@ -98,7 +110,7 @@ private struct OnboardingView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Dodoma fixes wrong-layout typing")
+            Text("Harf fixes wrong-layout typing")
                 .font(.title2)
 
             Text(OnboardingCopy.introduction)
@@ -108,12 +120,12 @@ private struct OnboardingView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     PermissionRow(
                         title: "Accessibility",
-                        detail: "Lets Dodoma read the text in front of the caret and replace it.",
+                        detail: "Lets Harf read the text in front of the caret and replace it.",
                         granted: model.permissions.accessibility,
                         open: { NSWorkspace.shared.open(PermissionPanes.accessibility) })
                     PermissionRow(
                         title: "Input Monitoring",
-                        detail: "Lets Dodoma see the keys you type.",
+                        detail: "Lets Harf see the keys you type.",
                         granted: model.permissions.inputMonitoring,
                         open: { NSWorkspace.shared.open(PermissionPanes.inputMonitoring) })
                     Text(OnboardingCopy.certificateNote)
@@ -124,7 +136,7 @@ private struct OnboardingView: View {
                 .padding(6)
             }
 
-            Toggle("Start Dodoma at login", isOn: loginItem)
+            Toggle("Start Harf at login", isOn: loginItem)
                 .disabled(model.loginStatus == .unavailable)
             if !model.loginStatus.explanation.isEmpty {
                 Text(model.loginStatus.explanation)
@@ -137,7 +149,7 @@ private struct OnboardingView: View {
 
             HStack {
                 Text(model.isReady
-                    ? "Both grants are in place — Dodoma is watching."
+                    ? "Both grants are in place — Harf is watching."
                     : "You can close this and grant the rest later; the menu-bar item says "
                         + "what is still missing.")
                     .font(.caption)

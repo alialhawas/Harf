@@ -29,10 +29,10 @@ enum LoginItemStatus: Equatable {
         case .enabled, .disabled:
             return ""
         case .requiresApproval:
-            return "macOS is holding this back. Approve Dodoma under "
+            return "macOS is holding this back. Approve Harf under "
                 + "System Settings > General > Login Items."
         case .notFound:
-            return "macOS cannot find the registered copy of Dodoma. This usually means the "
+            return "macOS cannot find the registered copy of Harf. This usually means the "
                 + "app was moved after it was registered — switch this off and on again from "
                 + "its current location."
         case .unavailable:

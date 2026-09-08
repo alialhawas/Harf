@@ -64,6 +64,13 @@ public final class LanguageModel: @unchecked Sendable {
     public let language: Language
 
     private let bundle: Bundle?
+    /// Words this user writes, consulted alongside the shipped list.
+    ///
+    /// Held weakly by nobody: the pipeline owns one lexicon and hands the same
+    /// instance to both models, so a word learned while writing English is not
+    /// mistaken for an Arabic one.
+    public var lexicon: UserLexicon?
+
     private let lock = NSLock()
     private var cached: Tables?
 
@@ -188,11 +195,21 @@ public final class LanguageModel: @unchecked Sendable {
     }
 
     private func isKnown(_ token: String, in tables: Tables) -> Bool {
-        for candidate in Self.lookupForms(of: token, language: language)
-        where tables.words.contains(candidate) {
-            return true
+        for candidate in Self.lookupForms(of: token, language: language) {
+            if tables.words.contains(candidate) { return true }
+            // The user's own vocabulary counts as much as the shipped list.
+            // Checked on the same affix-stripped forms, so a learned stem is
+            // still recognised with a clitic or a plural attached.
+            if lexicon?.contains(candidate, language: language) == true { return true }
         }
         return false
+    }
+
+    /// Tokens of this text, as `dictCoverage` sees them. The learning path uses
+    /// it so what gets counted is exactly what would later be looked up.
+    public func vocabulary(in text: String) -> [String] {
+        guard let tables = try? tables() else { return [] }
+        return tokens(in: text, alphabet: tables.bigrams)
     }
 
     // MARK: - Morphology

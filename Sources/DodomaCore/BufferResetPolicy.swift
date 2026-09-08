@@ -71,7 +71,9 @@ public enum BufferResetPolicy {
     }
 
     /// True when `now` is more than `idleTimeout` seconds after the last keystroke.
-    public static func isIdle(lastKeyTimestamp: TimeInterval, now: TimeInterval) -> Bool {
-        now - lastKeyTimestamp > idleTimeout
+    public static func isIdle(
+        lastKeyTimestamp: TimeInterval, now: TimeInterval, timeout: TimeInterval = idleTimeout
+    ) -> Bool {
+        now - lastKeyTimestamp > timeout
     }
 }

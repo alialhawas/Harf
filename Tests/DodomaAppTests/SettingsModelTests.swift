@@ -15,6 +15,7 @@ final class SettingsModelTests: XCTestCase {
     private var suiteName = ""
     private var defaults: UserDefaults!
     private var store: SettingsStore!
+    private var lexicon: UserLexicon!
     private var model: SettingsModel!
     private var cancellables: Set<AnyCancellable> = []
 
@@ -31,7 +32,10 @@ final class SettingsModelTests: XCTestCase {
         suiteName = "com.ali.dodoma.tests.\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: suiteName)
         store = SettingsStore(defaults: defaults)
-        model = SettingsModel(store: store)
+        // url: nil keeps the lexicon in memory. A test that wrote to the
+        // default location would edit the vocabulary of whoever ran it.
+        lexicon = UserLexicon(url: nil)
+        model = SettingsModel(store: store, lexicon: lexicon)
         model.refresh()
     }
 
@@ -39,6 +43,7 @@ final class SettingsModelTests: XCTestCase {
         cancellables.removeAll()
         model = nil
         store = nil
+        lexicon = nil
         defaults.removePersistentDomain(forName: suiteName)
         defaults = nil
         super.tearDown()
@@ -174,4 +179,62 @@ final class SettingsModelTests: XCTestCase {
             model.policyRows.first { $0.bundleID == mango }?.policy, .off,
             "a change made from the menu shows up in an open window")
     }
+
+    // MARK: - Vocabulary
+
+    func testAddedWordIsListedAsManualRegardlessOfCount() {
+        model.addWord("kubectl")
+
+        let row = model.vocabRows.first { $0.word == "kubectl" }
+        XCTAssertNotNil(row, "a word added by hand must appear without being counted to")
+        XCTAssertTrue(row?.manual == true)
+        XCTAssertTrue(row?.promoted == true)
+    }
+
+    func testCountedWordShowsProgressUntilThresholdThenCountsAsKnown() {
+        for _ in 1..<UserLexicon.promotionThreshold {
+            lexicon.observe(["endpoint"], language: .english)
+        }
+        model.refresh()
+        let pending = model.vocabRows.first { $0.word == "endpoint" }
+        XCTAssertEqual(pending?.promoted, false)
+        XCTAssertEqual(pending?.count, UserLexicon.promotionThreshold - 1)
+
+        lexicon.observe(["endpoint"], language: .english)
+        model.refresh()
+        XCTAssertEqual(model.vocabRows.first { $0.word == "endpoint" }?.promoted, true)
+    }
+
+    func testRemovingAWordDropsItFromTheList() {
+        model.addWord("kubectl")
+        model.removeWord("kubectl")
+
+        XCTAssertNil(model.vocabRows.first { $0.word == "kubectl" })
+    }
+
+    func testLanguagesAreListedSeparately() {
+        model.vocabLanguage = .english
+        model.addWord("kubectl")
+
+        model.vocabLanguage = .arabic
+        XCTAssertNil(
+            model.vocabRows.first { $0.word == "kubectl" },
+            "an English word must not appear under Arabic")
+
+        model.vocabLanguage = .english
+        XCTAssertNotNil(model.vocabRows.first { $0.word == "kubectl" })
+    }
+
+    func testErasingClearsBothLanguages() {
+        model.vocabLanguage = .english
+        model.addWord("kubectl")
+        model.vocabLanguage = .arabic
+        model.addWord("تجريب")
+
+        model.eraseVocabulary()
+        XCTAssertTrue(model.vocabRows.isEmpty)
+        model.vocabLanguage = .english
+        XCTAssertTrue(model.vocabRows.isEmpty)
+    }
+
 }

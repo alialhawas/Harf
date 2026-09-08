@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>حرف · لوحة مفاتيحك، باللغة التي قصدتها</title>
+<meta name="description" content="حرف يصحّح ما تكتبه بتخطيط لوحة المفاتيح الخاطئ. اكتب بالعربية والتخطيط الإنجليزي مفعّل، فيعيد كتابة الجملة مكانها ويبدّل اللوحة نيابةً عنك. لماك، بلا إنترنت، مفتوح المصدر.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&family=IBM+Plex+Sans+Arabic:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0B0F14; --raise:#111922; --teal:#5bc2ab; --teal-soft:#5bc2ab1f;
+  --ink:#f4f6f8; --dim:#a6b0bd; --mute:#7c8695; --line:#1d2630;
+  --wrong:#e9908f; --amber:#e6b45b;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%;overflow-x:hidden}
+body{background:var(--bg);color:var(--ink);overflow-x:hidden;
+  font-family:'IBM Plex Sans Arabic',system-ui,sans-serif;font-size:17px;line-height:1.85;
+  -webkit-font-smoothing:antialiased;font-feature-settings:"kern" 1}
+/* Arabic joins its letters: tracking is set to zero everywhere and never
+   inherited from a Latin display rule. */
+h1,h2,h3,h4{font-family:Cairo,'IBM Plex Sans Arabic',sans-serif;letter-spacing:0;line-height:1.32;font-weight:900}
+::selection{background:var(--teal);color:#04231c}
+::-webkit-scrollbar{width:11px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:#22303c;border-radius:99px;border:3px solid var(--bg)}
+::-webkit-scrollbar-thumb:hover{background:#2e404f}
+:focus-visible{outline:2px solid var(--teal);outline-offset:3px;border-radius:6px}
+a{color:inherit}
+.lat{direction:ltr;unicode-bidi:isolate;font-family:'JetBrains Mono',monospace}
+canvas#sky{position:fixed;inset:0;width:100%;height:100%;z-index:0;pointer-events:none}
+.wrap{position:relative;z-index:1;max-width:1140px;margin:0 auto;padding:0 30px}
+
+/* ── header ─────────────────────────────────────────────── */
+.top{position:sticky;top:0;z-index:30;background:rgba(11,15,20,.78);backdrop-filter:blur(16px);
+  border-bottom:1px solid var(--line)}
+.top .wrap{display:flex;align-items:center;gap:30px;height:70px}
+.mark{display:flex;align-items:center;gap:12px;font-family:Cairo,sans-serif;font-weight:900;font-size:22px}
+.cap{position:relative;display:grid;place-items:center;width:36px;height:36px;border-radius:10px;
+  background:linear-gradient(180deg,#1d2833,#151d26);border:1px solid #2c3947;
+  box-shadow:0 2px 0 #080c10, inset 0 1px 0 #ffffff0f}
+.cap b,.cap i{position:absolute;font-style:normal;font-size:16px;font-weight:700;transition:opacity .5s cubic-bezier(.2,.8,.2,1),transform .5s cubic-bezier(.2,.8,.2,1)}
+.cap b{color:var(--ink);font-family:'JetBrains Mono',monospace}
+.cap i{color:var(--teal);opacity:0;transform:translateY(8px)}
+.cap.on b{opacity:0;transform:translateY(-8px)}
+.cap.on i{opacity:1;transform:translateY(0)}
+.top nav{display:flex;gap:28px;margin-inline-start:auto}
+.top nav a{color:var(--dim);text-decoration:none;font-size:15.5px;font-weight:500;transition:color .2s}
+.top nav a:hover{color:var(--ink)}
+
+.btn{--fw:-1%;--fh:3px;--dly:0s;
+  display:inline-flex;align-items:center;gap:10px;padding:12px 24px;border-radius:12px;
+  font-family:Cairo,sans-serif;font-weight:700;font-size:16px;text-decoration:none;border:1px solid transparent;
+  background:linear-gradient(var(--liq) 0 0) no-repeat calc(200% - var(--fw)) 100% / 200% var(--fh);
+  background-color:var(--rest);
+  transition:background .34s var(--dly), color .34s .34s,
+             background-position .34s calc(.34s - var(--dly)), transform .22s ease}
+.btn:hover{--fw:100%;--fh:100%;--dly:.34s;transform:scale(1.05)}
+.btn:active{transform:scale(.95)}
+.solid{--rest:var(--teal);--liq:#eafaf5;color:#04231c}
+.solid:hover{color:#04231c}
+.hollow{--rest:#ffffff05;--liq:var(--teal);border-color:var(--line);color:var(--ink)}
+.hollow:hover{color:#04231c;border-color:var(--teal)}
+
+/* ── hero ───────────────────────────────────────────────── */
+.hero{padding:110px 0 30px}
+.hero-grid{display:grid;grid-template-columns:1fr minmax(0,.9fr);gap:56px;align-items:center}
+h1{font-size:clamp(38px,4.6vw,62px);text-wrap:balance}
+h1 .hit{color:var(--teal)}
+.hero p.lead{margin-top:26px;font-size:clamp(17px,1.5vw,20px);color:var(--dim);max-width:34em}
+.acts{display:flex;gap:14px;margin-top:38px;flex-wrap:wrap}
+.note{margin-top:18px;font-size:14.5px;color:var(--mute)}
+
+/* the keyboard: one key, two letters — the product in a single object */
+.board{padding:32px 26px 28px;border:1px solid var(--line);border-radius:20px;
+  background:linear-gradient(180deg,#ffffff08,#ffffff02);box-shadow:0 40px 90px -50px #000c}
+.keys{display:flex;gap:clamp(5px,1.6vw,9px);justify-content:center;flex-wrap:nowrap;direction:rtl}
+.key{position:relative;flex:none;width:clamp(42px,12.2vw,58px);height:clamp(48px,13vw,62px);border-radius:12px;
+  background:linear-gradient(180deg,#1e2a35,#151e27);border:1px solid #2c3947;
+  box-shadow:0 3px 0 #080c10, inset 0 1px 0 #ffffff0f;
+  transition:border-color .45s ease, box-shadow .45s ease, transform .45s cubic-bezier(.2,.8,.2,1)}
+/* Both legends, positioned the way they are actually printed on an Arabic
+   Mac keyboard: Latin small at the top left, Arabic large at the bottom
+   right. Nothing appears or disappears — the active script simply lights,
+   which is the honest depiction of what the layout switch does. */
+.key .en,.key .ar{position:absolute;transition:color .45s ease,opacity .45s ease}
+.key .en{top:6px;left:8px;font-family:'JetBrains Mono',monospace;font-size:clamp(10px,2.6vw,12.5px);color:#5f6b7a}
+.key .ar{bottom:4px;right:9px;font-family:Cairo,sans-serif;font-size:clamp(19px,5.4vw,26px);font-weight:700;color:#aeb9c6}
+.key.flip{border-color:#3d6459;transform:translateY(2px);
+  background:linear-gradient(180deg,#24352f,#18241f);
+  box-shadow:0 1px 0 #080c10, inset 0 1px 0 #ffffff14, 0 10px 20px -14px #000000e6}
+.key.flip .en{color:#3d4854;opacity:.55}
+.key.flip .ar{color:var(--teal)}
+.board-out{margin-top:26px;padding-top:22px;border-top:1px solid var(--line);
+  display:flex;align-items:center;justify-content:center;gap:18px;min-height:62px}
+.out-en{font-family:'JetBrains Mono',monospace;font-size:24px;color:var(--wrong);direction:ltr}
+.out-ar{font-family:Cairo,sans-serif;font-size:30px;font-weight:700;color:var(--teal)}
+.board-cap{margin-top:16px;text-align:center;font-size:14px;color:var(--mute)}
+
+/* ── sections ───────────────────────────────────────────── */
+section{padding:104px 0}
+h2{font-size:clamp(27px,3.4vw,44px);max-width:15em;text-wrap:balance}
+h2 .hit{color:var(--teal)}
+.say{margin-top:20px;font-size:18px;color:var(--dim);max-width:36em}
+
+.swap{display:grid;grid-template-columns:1fr auto 1fr;gap:24px;align-items:stretch;margin-top:48px}
+.pane{padding:32px;border:1px solid var(--line);border-radius:18px;background:#ffffff05;
+  display:flex;flex-direction:column;justify-content:center;gap:12px}
+.pane small{font-size:14px;color:var(--mute)}
+.pane .big{font-size:29px}
+.swap-mid{display:grid;place-items:center;color:var(--teal)}
+
+.flow{margin-top:52px;border-inline-start:1px solid var(--line);padding-inline-start:34px;
+  display:flex;flex-direction:column;gap:44px}
+.step{position:relative}
+.step::before{content:"";position:absolute;inset-inline-start:-42px;top:12px;width:15px;height:15px;
+  border-radius:50%;background:var(--bg);border:2px solid var(--teal)}
+.step h3{font-size:22px;margin-bottom:8px}
+.step p{color:var(--dim);max-width:38em}
+
+.rows{margin-top:46px;border:1px solid var(--line);border-radius:18px;overflow:hidden}
+.row{display:grid;grid-template-columns:230px 1fr;gap:26px;padding:22px 28px;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:none}
+.row:nth-child(odd){background:#ffffff08}
+.row dt{font-family:Cairo,sans-serif;font-weight:700;font-size:17px}
+.row dd{color:var(--dim);font-size:16px}
+
+.facts{margin-top:46px;display:grid;grid-template-columns:repeat(2,1fr);gap:0;
+  border:1px solid var(--line);border-radius:18px;overflow:hidden}
+.fact{padding:30px;border-inline-end:1px solid var(--line);border-bottom:1px solid var(--line)}
+.fact:nth-child(2n){border-inline-end:none}
+.fact:nth-last-child(-n+2){border-bottom:none}
+.fact h3{font-size:19px;margin-bottom:8px}
+.fact p{color:var(--dim);font-size:16px}
+
+ol.install{margin-top:46px;list-style:none;counter-reset:i}
+ol.install li{counter-increment:i;display:grid;grid-template-columns:46px 1fr;gap:22px;
+  padding:24px 0;border-bottom:1px solid var(--line)}
+ol.install li:last-child{border-bottom:none}
+ol.install li::before{content:counter(i);display:grid;place-items:center;width:38px;height:38px;
+  border-radius:11px;background:var(--teal-soft);color:var(--teal);
+  font-family:'JetBrains Mono',monospace;font-size:15px}
+ol.install h3{font-size:19px;margin-bottom:6px}
+ol.install p{color:var(--dim);font-size:16px}
+code{font-family:'JetBrains Mono',monospace;font-size:14.5px;background:#ffffff0d;padding:3px 9px;
+  border-radius:6px;color:var(--teal);border:1px solid var(--line);direction:ltr;unicode-bidi:isolate}
+
+details{border:1px solid var(--line);border-radius:15px;padding:22px 26px;margin-top:14px;background:#ffffff05}
+details[open]{border-color:#2c3947}
+summary{font-family:Cairo,sans-serif;font-weight:700;font-size:18px;cursor:pointer;list-style:none;
+  display:flex;justify-content:space-between;align-items:center;gap:18px}
+summary::-webkit-details-marker{display:none}
+summary .pm{flex:none;width:22px;height:22px;position:relative}
+summary .pm::before,summary .pm::after{content:"";position:absolute;inset-inline-start:3px;top:10px;
+  width:16px;height:2px;background:var(--teal);border-radius:2px;transition:transform .3s cubic-bezier(.2,.8,.2,1)}
+summary .pm::after{transform:rotate(90deg)}
+details[open] summary .pm::after{transform:rotate(0)}
+details p{margin-top:14px;color:var(--dim);font-size:16.5px}
+
+footer{border-top:1px solid var(--line);padding:56px 0 70px;margin-top:50px}
+.foot{display:flex;justify-content:space-between;align-items:center;gap:26px;flex-wrap:wrap}
+.foot p{font-size:15px;color:var(--mute)}
+.foot nav{display:flex;gap:24px}
+.foot a{color:var(--dim);text-decoration:none;font-size:15px}
+.foot a:hover{color:var(--teal)}
+
+@media(max-width:940px){
+  .hero-grid{grid-template-columns:1fr;gap:46px}
+  .swap{grid-template-columns:1fr}
+  .swap-mid{transform:rotate(90deg)}
+  .facts{grid-template-columns:1fr}
+  .fact{border-inline-end:none}
+  .fact:nth-last-child(2){border-bottom:1px solid var(--line)}
+  .row{grid-template-columns:1fr;gap:6px}
+  .top nav{display:none}
+  section{padding:76px 0}
+  .hero{padding:70px 0 10px}
+}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition-duration:.01ms!important}}
+</style>
+</head>
+<body>
+<canvas id="sky"></canvas>
+
+<div class="top"><div class="wrap">
+  <a class="mark" href="#" style="text-decoration:none">
+    <span class="cap" id="cap"><b>H</b><i>ح</i></span> حرف
+  </a>
+  <nav>
+    <a href="#khalal">الخلل</a>
+    <a href="#kayf">كيف يعمل</a>
+    <a href="#aman">الأمان</a>
+    <a href="#tatbiqat">التحكّم</a>
+    <a href="#tathbit">التثبيت</a>
+  </nav>
+  <a class="btn solid" href="#tathbit">حمّله</a>
+</div></div>
+
+<header class="hero"><div class="wrap hero-grid">
+  <div>
+    <h1>كتبتَ الحروف الصحيحة.<br>لوحة المفاتيح كانت <span class="hit">خاطئة</span>.</h1>
+    <p class="lead">حرف ينتبه حين تصبح الجملة مفهومة في التخطيط الآخر وحده، فيعيد كتابتها مكانها ويبدّل اللوحة وأنت تكمل. عربي وإنجليزي، في الاتجاهين، دون أن تلمس شيئًا.</p>
+    <div class="acts">
+      <a class="btn solid" href="#tathbit">حمّله لماك</a>
+      <a class="btn hollow" href="https://github.com/alialhawas/Language-changer">الشيفرة المصدرية</a>
+    </div>
+    <p class="note">ماك 14 فأحدث · مجاني ومفتوح المصدر · لا شيء يغادر جهازك</p>
+  </div>
+
+  <div class="board" aria-hidden="true">
+    <div class="keys" id="keys"></div>
+    <div class="board-out"><span id="out" class="out-en">hgsghl</span></div>
+    <p class="board-cap">المفتاح نفسه. حرفان. هذا كل ما في الأمر.</p>
+  </div>
+</div></header>
+
+<section id="khalal"><div class="wrap">
+  <h2>لا أحد ينسى اللغة.<br>الجميع ينسى <span class="hit">التخطيط</span>.</h2>
+  <p class="say">تبدّل إلى الإنجليزية لتلصق رابطًا، ثم تعود لتكتب بالعربية فتبدأ مباشرة. لا شيء ينبّهك. أول إشارة أن شيئًا خاطئًا هي سطر من الرموز، وكل مفتاح ضغطته كان المفتاح الصحيح أصلًا.</p>
+  <div class="swap">
+    <div class="pane"><small>ما ظهر</small><div class="big lat" style="color:var(--wrong)">hgsghl ugd;l</div></div>
+    <div class="swap-mid">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m11 18-6-6 6-6"/></svg>
+    </div>
+    <div class="pane"><small>ما قصدت</small><div class="big" style="color:var(--teal);font-family:Cairo,sans-serif;font-weight:700">السلام عليكم</div></div>
+  </div>
+  <p class="say" style="margin-top:40px">الحلّ القديم واحد لا يتغيّر: تحدّد السطر، تحذفه، تبحث عن مبدّل اللغة، ثم تكتب كل شيء من جديد. عشر مرات في اليوم. الكلفة ليست الثواني، بل الجملة التي كنت تؤلّفها وضاعت وأنت تصارع اللوحة.</p>
+</div></section>
+
+<section id="kayf"><div class="wrap">
+  <h2>يقرأ <span class="hit">المفاتيح</span>، لا الحروف.</h2>
+  <p class="say">الحروف التي على الشاشة هي الخطأ نفسه. أمّا المفتاح الذي ضغطته فهو ذاته في التخطيطين، ولذلك يمكن استرجاع ما قصدته بدقّة، بلا تخمين وبلا تصحيح تلقائي يعيد صياغة كلامك.</p>
+  <div class="flow">
+    <div class="step">
+      <h3>يسجّل المفاتيح</h3>
+      <p>كل ضغطة تُحفظ كموضع مفتاح، لا كحرف. لا شيء يُقرأ من شاشتك، ولا شيء يُكتب على القرص.</p>
+    </div>
+    <div class="step">
+      <h3>يقرأها مرّتين</h3>
+      <p>عند توقّفك ثانية واحدة، يُمرَّر تسلسل المفاتيح عبر التخطيطين معًا باستخدام جداول ماك نفسها: نصّ حقيقي، لا جدول استبدال.</p>
+    </div>
+    <div class="step">
+      <h3>يوازن ثم يتصرّف</h3>
+      <p>تُقيَّم القراءتان محليًا مقابل قواميس مدمجة. القراءة الفائزة بوضوح تُكتب صامتة، والحالة المتقاربة تُعرض بطاقةً يقبلها مفتاح <code>Tab</code> وحده.</p>
+    </div>
+  </div>
+</div></section>
+
+<section id="aman"><div class="wrap">
+  <h2>إنه يحذف نصّك.<br>لذلك يتحرّى <span class="hit">قبل</span> أن يفعل.</h2>
+  <p class="say">برنامج يعدّل ما كتبته دون أن يسألك عليه أن يستحقّ ذلك. كل واحد ممّا يلي قادر على إلغاء التصحيح فقط، ولا يستطيع أيٌّ منها أن يتسبّب فيه.</p>
+  <dl class="rows">
+    <div class="row"><dt>حقول كلمات المرور</dt><dd>الحقول الآمنة لا تُلتقط أصلًا، وسجلّ الضغطات يُمحى فور اكتشاف أحدها.</dd></div>
+    <div class="row"><dt>الطرفية</dt><dd>اقتراح فقط، افتراضيًا. تصحيح خاطئ داخل الطرفية أسوأ من تصحيح خاطئ داخل جملة.</dd></div>
+    <div class="row"><dt>تحقّق قبل الحذف</dt><dd>يُسأل التطبيق عمّا يسبق المؤشّر. إذا خالف الجواب ما سجّله حرف، امتنع وعرض اقتراحًا بدلًا من أن يحذف.</dd></div>
+    <div class="row"><dt>المقطع الأخير وحده</dt><dd>السطر ثنائي اللغة لا يُعاد كتابته كاملًا، بل المقطع الذي يُقرأ أفضل في التخطيط الآخر وحده.</dd></div>
+    <div class="row"><dt>الشيفرة تُترك وشأنها</dt><dd>الروابط والمسارات والبُرد والمعرّفات وأرقام الإصدارات وأوامر الطرفية تُميَّز وتُتجاوز.</dd></div>
+    <div class="row"><dt>مفتاح واحد يتراجع</dt><dd><code>⌥⌘Z</code> يعيد ما كتبته حرفًا بحرف ويعيد اللوحة كما كانت، و<code>⌥⌘P</code> يوقف كل شيء فورًا.</dd></div>
+    <div class="row"><dt>بلا إنترنت</dt><dd>لا توجد في التطبيق شيفرة اتصال بالشبكة إطلاقًا. القواميس مدمجة داخله.</dd></div>
+  </dl>
+</div></section>
+
+<section><div class="wrap">
+  <h2>هادئ <span class="hit">افتراضيًا</span>.</h2>
+  <div class="facts">
+    <div class="fact"><h3>أسرع من أن تلحظه</h3><p>الجملة الكاملة تُستبدل في نحو ١٦٠ جزءًا من الثانية. ترى النصّ مصحَّحًا، لا عملية التصحيح.</p></div>
+    <div class="fact"><h3>تحكّم لكل تطبيق</h3><p>عادي، أو اقتراح فقط، أو معطّل. الطرفيات ومديرو كلمات المرور مضبوطون لك سلفًا.</p></div>
+    <div class="fact"><h3>ثلاث درجات حساسية</h3><p>متحفّظ، متوازن، أو جريء: مؤشّر واحد يحرّك كل العتبات معًا.</p></div>
+    <div class="fact"><h3>في شريط القوائم فقط</h3><p>بلا أيقونة في الدوك وبلا نوافذ تعترض طريقك. استهلاك المعالج صفر تقريبًا أثناء الكتابة.</p></div>
+  </div>
+</div></section>
+
+<section id="tatbiqat"><div class="wrap">
+  <h2>ثلاثة أوضاع، <span class="hit">لكل تطبيق</span>.</h2>
+  <p class="say">كل تطبيق على وضع «عادي» ما لم تغيّره، بما في ذلك ما تثبّته غدًا. الاستثناءات وحدها مضبوطة سلفًا، وكلها تنقص التدخّل لا تزيده.</p>
+  <dl class="rows">
+    <div class="row"><dt>عادي</dt><dd>يستبدل النصّ صامتًا حين تكون القراءة الأخرى فائزة بوضوح، ويعرض بطاقة حين تتقارب القراءتان. هذا وضع كل شيء افتراضيًا.</dd></div>
+    <div class="row"><dt>اقتراح فقط</dt><dd>لا يحذف حرفًا من تلقاء نفسه أبدًا. تظهر البطاقة، فيطبّقها <code>Tab</code> أو نقرة عليها، ويصرفها <code>esc</code> أو أن تواصل الكتابة. الطرفيات هنا افتراضيًا.</dd></div>
+    <div class="row"><dt>معطّل</dt><dd>لا يُلتقط شيء أصلًا في ذلك التطبيق. مديرو كلمات المرور ونوافذ تسجيل الدخول هنا افتراضيًا.</dd></div>
+  </dl>
+  <div class="facts">
+    <div class="fact"><h3>من شريط القوائم</h3><p>اجعل التطبيق الذي تقصده في المقدّمة، ثم افتح قائمة حرف: القائمة الفرعية تخصّ ذلك التطبيق وحده. لا حاجة إلى معرفة معرّفه.</p></div>
+    <div class="fact"><h3>من الطرفية</h3><p><code>harf --policy</code> يسرد الجميع، و<code>harf --policy com.mitchellh.ghostty normal</code> يغيّر واحدًا. ومعرّف أي تطبيق: <code>osascript -e 'id of app "Slack"'</code>.</p></div>
+  </div>
+</div></section>
+
+<section id="tathbit"><div class="wrap">
+  <h2>أربع خطوات، <span class="hit">مرّة واحدة</span>.</h2>
+  <ol class="install">
+    <li><div><h3>احصل عليه</h3><p>نزّل التطبيق، أو استنسخ المستودع ونفّذ <code>make install</code> لبنائه من المصدر.</p></div></li>
+    <li><div><h3>امنحه إذنين</h3><p><strong>مراقبة الإدخال</strong> ليرى المفاتيح التي تضغطها، و<strong>إمكانية الوصول</strong> ليستبدل النصّ. لا يعمل بإذن واحد منهما.</p></div></li>
+    <li><div><h3>اكتب شيئًا خاطئًا</h3><p>والتخطيط الإنجليزي مفعّل، اكتب <code>hgsghl ugd;l</code> ثم توقّف ثانية واحدة. ستصير الجملة «السلام عليكم».</p></div></li>
+    <li><div><h3>ثم انسه</h3><p>هذا هو المنتج كلّه. تكفّ عن ملاحظة أنك نسيت التبديل أصلًا.</p></div></li>
+  </ol>
+</div></section>
+
+<section><div class="wrap">
+  <h2>شكوك <span class="hit">في محلّها</span>.</h2>
+  <details><summary>هل يرسل ضغطاتي إلى أي مكان؟<span class="pm"></span></summary><p>لا. لا توجد في التطبيق شيفرة شبكة إطلاقًا، والمصدر مفتوح لتتحقّق بنفسك. قوائم الكلمات مدمجة داخله وكل قرار يُتّخذ على جهازك. وسجلّ الضغطات لا يُكتب على القرص أبدًا: مئتا مفتاح على الأكثر، في الذاكرة وحدها، ويُمسح باستمرار.</p><p>يُحفَظ شيء واحد: قاموس كلماتك أنت. الكلمات التي تكتبها ولا تعرفها القوائم المدمجة تُعَدّ، وما تكرّر منها عشر مرّات يصير كلمة معروفة، حتى لا يُحسب اسم أداة تستعملها يوميًا هراءً. الملفّ في مجلّد دعم التطبيقات، لا يقرؤه سواك، و<code>harf --words list</code> يعرض ما فيه، و<code>harf --set learn off</code> يوقف ذلك ويمحوه.</p></details>
+  <details><summary>وإذا صحّح شيئًا قصدته؟<span class="pm"></span></summary><p><code>⌥⌘Z</code> يعيده تمامًا ويعيد التخطيط كما كان، خلال ثلاثين ثانية من أي تصحيح. ويمتنع بعدها عن تصحيح النصّ نفسه حتى لا يتأرجح. عمليًا هو متحفّظ: الكتابة الطبيعية بأي من اللغتين لا تستدعي شيئًا.</p></details>
+  <details><summary>هل يفسد شيفرتي أو أوامر الطرفية؟<span class="pm"></span></summary><p>الروابط والمسارات والبُرد والمعرّفات بصيغتَي <span class="lat">camelCase</span> و<span class="lat">snake_case</span> وأرقام الإصدارات وأي كلمة تلتصق فيها الأرقام بالحروف: كلها تُتجاوز. والطرفيات على وضع الاقتراح افتراضيًا، فلا يُعاد كتابة شيء داخل صدفة دون أن تضغط مفتاح <code>Tab</code> بنفسك.</p></details>
+  <details><summary>هل يعمل في كل التطبيقات؟<span class="pm"></span></summary><p>في أغلبها. بعض التطبيقات التي ترسم محرّرها داخل عرض ويب لا تستطيع إخبار حرف بما يسبق المؤشّر، وهناك يعرض اقتراحًا بدل أن يعيد الكتابة صامتًا. هذا مقصود، لأن حذف نصّ لا يستطيع التحقّق منه هو تحديدًا ما يفسد عملك.</p></details>
+  <details><summary>ولماذا لا يكفي التصحيح التلقائي؟<span class="pm"></span></summary><p>التصحيح التلقائي يخمّن ما قصدته انطلاقًا من حروف خاطئة أصلًا. حرف لا يخمّن: يعيد تمرير المفاتيح ذاتها التي ضغطتها عبر التخطيط الآخر، فتكون النتيجة بالضبط ما كنت ستكتبه لو كان التخطيط صحيحًا.</p></details>
+</div></section>
+
+<footer><div class="wrap foot">
+  <p>حرف · مجاني ومفتوح المصدر.</p>
+  <nav>
+    <a href="https://github.com/alialhawas/Language-changer">غِت‌هَب</a>
+    <a href="#tathbit">التثبيت</a>
+    <a href="#aman">الأمان</a>
+  </nav>
+</div></footer>
+
+<script>
+/* starfield — the same simulation the app draws in its own windows */
+(function(){
+  const c=document.getElementById('sky'),x=c.getContext('2d');
+  let w=0,h=0,dpr=Math.min(devicePixelRatio||1,2),st=[],m={x:-9e3,y:-9e3};
+  const seed=()=>st=Array.from({length:88},()=>{const a=Math.random()*6.283,s=.3*(.5+Math.random()*.5);
+    return{x:Math.random()*w,y:Math.random()*h,vx:Math.cos(a)*s,vy:Math.sin(a)*s,
+      r:Math.random()*2.1+1,o:.75,b:.75,g:1};});
+  function size(){w=innerWidth;h=innerHeight;c.width=w*dpr;c.height=h*dpr;x.setTransform(dpr,0,0,dpr,0,0);if(!st.length)seed();}
+  addEventListener('resize',size);
+  addEventListener('mousemove',e=>{m.x=e.clientX;m.y=e.clientY});
+  (function loop(){
+    x.clearRect(0,0,w,h);
+    for(const p of st){
+      const dx=m.x-p.x,dy=m.y-p.y,d=Math.hypot(dx,dy);
+      if(d<100&&d>0){const f=(100-d)/100,g=f*.075;p.vx+=dx/d*g;p.vy+=dy/d*g;
+        p.o=Math.min(1,p.b+f*.4);p.g+=(1+f*2-p.g)*.15;}
+      else{p.o=Math.max(p.b*.3,p.o-.02);p.g=Math.max(1,p.g+(1-p.g)*.08);}
+      p.x+=p.vx;p.y+=p.vy;p.vx*=.999;p.vy*=.999;
+      if(p.x<0)p.x=w;if(p.x>w)p.x=0;if(p.y<0)p.y=h;if(p.y>h)p.y=0;
+      const bl=p.r*(2.5+1.2*p.g);
+      x.beginPath();x.arc(p.x,p.y,bl,0,7);x.fillStyle='rgba(190,235,225,'+(p.o*.1*p.g)+')';x.fill();
+      x.beginPath();x.arc(p.x,p.y,p.r,0,7);x.fillStyle='rgba(224,244,239,'+p.o+')';x.fill();
+    }
+    requestAnimationFrame(loop);
+  })();
+  size();
+})();
+
+/* the keyboard: h g s g h l  ⇄  ا ل س ل ا م */
+(function(){
+  const PAIRS=[['h','ا'],['g','ل'],['s','س'],['g','ل'],['h','ا'],['l','م']];
+  const box=document.getElementById('keys'),out=document.getElementById('out'),cap=document.getElementById('cap');
+  PAIRS.forEach(([en,ar])=>{
+    const k=document.createElement('div');k.className='key';
+    k.innerHTML='<span class="en">'+en+'</span><span class="ar">'+ar+'</span>';
+    box.appendChild(k);
+  });
+  const keys=[...box.children];
+  const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  /* The wave runs along the word, right to left, the direction the Arabic is
+     read in — so the letters light in the order they are spoken. */
+  function cycle(){
+    keys.forEach((k,i)=>setTimeout(()=>k.classList.add('flip'),i*135));
+    setTimeout(()=>{out.className='out-ar';out.textContent='السلام';cap.classList.add('on');},PAIRS.length*135+200);
+    setTimeout(()=>{
+      keys.forEach((k,i)=>setTimeout(()=>k.classList.remove('flip'),i*70));
+      out.className='out-en';out.textContent='hgsghl';cap.classList.remove('on');
+    },PAIRS.length*135+3600);
+    setTimeout(cycle,PAIRS.length*135+4800);
+  }
+  if(reduce){keys.forEach(k=>k.classList.add('flip'));out.className='out-ar';out.textContent='السلام';cap.classList.add('on');}
+  else cycle();
+})();
+</script>
+</body>
+</html>

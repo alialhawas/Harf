@@ -45,7 +45,7 @@ final class CaretVerificationTests: XCTestCase {
     }
 
     func testEmptyAccessibilityTextDowngrades() {
-        XCTAssertEqual(reason("", "hgsghl"), "caret text is shorter than the typed text")
+        XCTAssertEqual(reason("", "hgsghl"), "caret text is too short to confirm anything")
     }
 
     func testEmptyReplacementDowngrades() {
@@ -56,8 +56,30 @@ final class CaretVerificationTests: XCTestCase {
             "an explicit request for nothing is still nothing")
     }
 
+    /// Three agreeing characters is a coincidence, not a confirmation.
     func testShorterCaretTextDowngrades() {
-        XCTAssertEqual(reason("ghl", "hgsghl"), "caret text is shorter than the typed text")
+        XCTAssertEqual(reason("ghl", "hgsghl"), "caret text is too short to confirm anything")
+    }
+
+    /// A short answer that agrees is still evidence.
+    ///
+    /// Terminals report only the current line or the visible cells, so they
+    /// answer with a few characters however much was typed. Refusing those
+    /// outright disqualified every such app and pushed the user towards turning
+    /// the check off by hand, which is strictly worse than believing an answer
+    /// that matches.
+    func testShorterCaretTextThatAgreesIsAccepted() {
+        XCTAssertNil(reason("sghl", "hgsghl"), "the tail the app can see matches")
+        XCTAssertNil(reason("ويها اليوم", "اذ ودك انا اسويها اليوم"))
+    }
+
+    /// A short answer that disagrees is a contradiction and must still stop it.
+    func testShorterCaretTextThatDisagreesDowngrades() {
+        XCTAssertEqual(
+            reason("xxxx", "hgsghl"), "caret text does not end with the typed text")
+        XCTAssertEqual(
+            reason("hgsg", "hgsghl"), "caret text does not end with the typed text",
+            "matching the start is not matching the caret")
     }
 
     /// The buffer routinely ends in the separator the user typed after the

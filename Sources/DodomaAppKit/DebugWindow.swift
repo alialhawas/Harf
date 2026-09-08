@@ -86,12 +86,12 @@ final class DebugWindowController {
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false)
-        window.title = "Dodoma Debug — keystrokes visible"
+        window.title = "Harf Debug — keystrokes visible"
         window.isReleasedWhenClosed = false
         window.level = .floating
         window.contentView = NSHostingView(rootView: DebugView(model: model))
         window.center()
-        window.setFrameAutosaveName("DodomaDebugWindow")
+        window.setFrameAutosaveName("HarfDebugWindow")
         return window
     }
 }

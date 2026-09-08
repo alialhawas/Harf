@@ -17,6 +17,33 @@ struct FocusInspection: Equatable {
     static let unavailable = FocusInspection(security: .unknown, caretRead: .unavailable)
 }
 
+/// What the focused element has selected.
+///
+/// Four cases rather than a `String?`, and for the same reason `CaretRead` has
+/// four: "there is nothing selected here", "there is no text surface here to
+/// have a selection in" and "there is a selection and I will not show it to
+/// you" are three different pieces of evidence, and a `String?` collapses them
+/// into one nil that no caller can reason about.
+enum SelectionRead: Equatable {
+    /// `kAXSelectedTextRange` reported a non-empty range and the text behind it
+    /// was read. The only case a selection flip may act on.
+    case selected(String)
+    /// An element with a caret and an empty range. Nothing is selected, which
+    /// is a fact, not a failure: the flip has nothing to do and the caller
+    /// falls back to the typed buffer.
+    case noSelection
+    /// The element exposes no text surface at all — it answered neither
+    /// `kAXSelectedTextRange` nor `kAXValue` — or the application reports no
+    /// focused element while the grant is held. A terminal drawing its own
+    /// cells answers exactly this. Structural silence: nothing was seen, and
+    /// nothing was hidden either.
+    case unreadable
+    /// No answer that may be relied on: no pid, no accessibility grant, the
+    /// deadline expired, a secure field whose selection must never be read, or
+    /// an element that claimed a selection and then would not hand it over.
+    case unavailable
+}
+
 /// The half of `FocusOracle` the typing pipeline uses.
 ///
 /// A protocol so the pipeline's gate can be driven from tests without an
@@ -25,6 +52,7 @@ struct FocusInspection: Equatable {
 /// oracle's business and nothing decides anything destructive on it.
 protocol FocusInspecting: AnyObject {
     func inspect(pid: pid_t?, caretTextLength: Int?, completion: @escaping (FocusInspection) -> Void)
+    func selectedText(pid: pid_t?, completion: @escaping (SelectionRead) -> Void)
     func invalidate()
 }
 
@@ -139,6 +167,35 @@ final class FocusOracle {
             pid: pid, geometry: geometry, rightToLeftText: rightToLeftText)
     }
 
+    /// Reads what the focused element of `pid` has selected, under the same
+    /// three limits as `inspect`: this queue, the per-element messaging
+    /// timeout, and one 250 ms deadline over the whole read. Answers exactly
+    /// once, on the oracle's queue or on `timeoutQueue` if the deadline wins.
+    ///
+    /// The deadline's answer is `.unavailable` rather than `.noSelection`: an
+    /// application that did not answer in time may well have a selection, and
+    /// treating that silence as "nothing is selected" would send the flip at
+    /// the typed buffer instead of at the text the user highlighted.
+    func selectedText(pid: pid_t?, completion: @escaping (SelectionRead) -> Void) {
+        let once = Once(completion)
+        guard let pid else {
+            once.fire(.unavailable)
+            return
+        }
+
+        let expiry = DispatchWorkItem { [once] in
+            Log.pipeline.debug("selection read hit its deadline")
+            once.fire(.unavailable)
+        }
+        timeoutQueue.asyncAfter(deadline: .now() + Self.deadline, execute: expiry)
+
+        queue.async { [weak self] in
+            let result = self?.performSelection(pid: pid) ?? .unavailable
+            expiry.cancel()
+            once.fire(result)
+        }
+    }
+
     /// Forgets the cached verdict. Called when the frontmost app changes: the
     /// focused element belongs to the app that had focus.
     func invalidate() {
@@ -157,7 +214,7 @@ final class FocusOracle {
         _ = AXUIElementSetMessagingTimeout(application, Self.messagingTimeout)
 
         guard let focused = element(application, kAXFocusedUIElementAttribute) else {
-            return .unavailable
+            return Self.withoutFocusedElement(trusted: AXIsProcessTrusted())
         }
         _ = AXUIElementSetMessagingTimeout(focused, Self.messagingTimeout)
 
@@ -167,6 +224,33 @@ final class FocusOracle {
         }
         return FocusInspection(
             security: security, caretRead: caretRead(of: focused, length: caretTextLength))
+    }
+
+    /// What an application that reports no focused element at all means.
+    ///
+    /// It has two very different causes and they were collapsed into one.
+    /// Without the accessibility grant the nil says only that we are blind: the
+    /// app may well have text and a caret, and nothing may be concluded. With
+    /// the grant in hand, the same nil is the application telling us it has no
+    /// accessibility text surface — Ghostty and other terminals that draw their
+    /// own cells answer exactly this, no focused element and no windows.
+    ///
+    /// That second case is the structural silence `caretRead` already names
+    /// `.unreadable` one level down for an element that exposes no value. The
+    /// distinction matters: `.unreadable` lets a rewrite the user *asked* for
+    /// by pressing the accept key go ahead, while `.unavailable` refuses it.
+    /// Collapsing them meant Harf could do nothing in such an app — not an
+    /// automatic fix, which is right, but not an accepted suggestion either,
+    /// which left the user with a card that did nothing when pressed.
+    ///
+    /// Automatic rewrites stay blocked either way: `.unreadable` only proceeds
+    /// under `.bestEffort`, and the automatic path asks for `.required`.
+    ///
+    /// Split out as a pure function so both branches are testable; everything
+    /// around it needs a live accessibility grant and a focused application.
+    static func withoutFocusedElement(trusted: Bool) -> FocusInspection {
+        guard trusted else { return .unavailable }
+        return FocusInspection(security: .unknown, caretRead: .unreadable)
     }
 
     /// A password field answers with the secure subrole. A few older Carbon and
@@ -239,6 +323,96 @@ final class FocusOracle {
         let units = Array(value.utf16)
         guard caret <= units.count else { return .unavailable }
         return .value(String(decoding: units[(caret - wanted)..<caret], as: UTF16.self))
+    }
+
+    /// Everything the accessibility API will say about the current selection,
+    /// gathered here and interpreted by `selectionRead`.
+    ///
+    /// Like `caretRead`, this is AX-bound: every line of it is a synchronous
+    /// round trip into another application, and there is no seam underneath it
+    /// to fake. What can be tested is the mapping, so the mapping is a pure
+    /// static function and this one only collects the facts.
+    private func performSelection(pid: pid_t) -> SelectionRead {
+        dispatchPrecondition(condition: .onQueue(queue))
+
+        let application = AXUIElementCreateApplication(pid)
+        _ = AXUIElementSetMessagingTimeout(application, Self.messagingTimeout)
+
+        guard let focused = element(application, kAXFocusedUIElementAttribute) else {
+            return Self.selectionRead(
+                trusted: AXIsProcessTrusted(), security: .unknown, hasFocusedElement: false,
+                selectedRangeLength: nil, hasValue: false, selectedText: nil)
+        }
+        _ = AXUIElementSetMessagingTimeout(focused, Self.messagingTimeout)
+
+        // First, and before any read of the text: the selection inside a
+        // password field *is* the password, so asking for it is itself the
+        // leak. `selectionRead` refuses `.secure` too; the guard is here so the
+        // read never happens at all.
+        let security = cachedSecurity(of: focused)
+        guard security != .secure else { return .unavailable }
+
+        guard let selection = range(focused, kAXSelectedTextRangeAttribute) else {
+            return Self.selectionRead(
+                trusted: true, security: security, hasFocusedElement: true,
+                selectedRangeLength: nil,
+                hasValue: string(focused, kAXValueAttribute) != nil, selectedText: nil)
+        }
+        return Self.selectionRead(
+            trusted: true, security: security, hasFocusedElement: true,
+            selectedRangeLength: selection.length, hasValue: true,
+            selectedText: selection.length > 0 ? text(of: focused, in: selection) : nil)
+    }
+
+    /// What the accessibility answers mean, as a pure function.
+    ///
+    /// The reasoning mirrors `perform`/`caretRead` one attribute over:
+    ///
+    /// - no focused element forks on the grant exactly as
+    ///   `withoutFocusedElement(trusted:)` does. Without it the nil says only
+    ///   that Harf is blind; with it, the application is saying it has no
+    ///   accessibility text surface, which is silence and not a refusal.
+    /// - a secure field is never read, so it can only ever be `.unavailable`.
+    /// - neither a selected range nor a value is the same structural silence
+    ///   one level down: not a text field anybody can reason about.
+    /// - a value but no range is the noisy failure: it has text and will not
+    ///   say what is selected in it.
+    /// - a range of length zero is a caret with nothing selected, which is a
+    ///   fact the caller can act on.
+    /// - a non-empty range that yielded no text claimed a selection and then
+    ///   would not hand it over. Flipping a selection whose contents are
+    ///   unknown would overwrite it with a guess, so that is `.unavailable`.
+    ///
+    /// - Parameter selectedText: whatever the reads managed to produce for a
+    ///   non-empty range — `kAXSelectedText` first, the parameterized string
+    ///   over the range second — or nil if neither answered.
+    static func selectionRead(
+        trusted: Bool,
+        security: SecureFieldState,
+        hasFocusedElement: Bool,
+        selectedRangeLength: Int?,
+        hasValue: Bool,
+        selectedText: String?
+    ) -> SelectionRead {
+        guard hasFocusedElement else { return trusted ? .unreadable : .unavailable }
+        guard security != .secure else { return .unavailable }
+        guard let selectedRangeLength else { return hasValue ? .unavailable : .unreadable }
+        guard selectedRangeLength > 0 else { return .noSelection }
+        guard let selectedText, !selectedText.isEmpty else { return .unavailable }
+        return .selected(selectedText)
+    }
+
+    /// The text of a non-empty selection.
+    ///
+    /// `kAXSelectedText` is the direct question and most applications answer
+    /// it. The parameterized string over the range is the fallback for the
+    /// ones that expose the range and the text but not the convenience
+    /// attribute — the same split `caretRead` has to handle.
+    private func text(of element: AXUIElement, in selection: CFRange) -> String? {
+        if let text = string(element, kAXSelectedTextAttribute), !text.isEmpty { return text }
+        var wanted = selection
+        guard let argument = AXValueCreate(.cfRange, &wanted) else { return nil }
+        return string(element, kAXStringForRangeParameterizedAttribute, parameter: argument)
     }
 
     // MARK: - Attribute helpers

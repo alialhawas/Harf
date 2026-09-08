@@ -35,6 +35,15 @@ public struct GuardResult: Equatable, Sendable {
     }
 
     public var isEmpty: Bool { vetoes.isEmpty }
+
+    /// Everything except "this is only one short word".
+    ///
+    /// Shortness is a statement about how much evidence there is, which a high
+    /// enough score answers directly. Every other veto says the text is not
+    /// prose — a path, an address, an identifier — and no score overrides that.
+    public var vetoesBesidesShortness: [GuardReason] {
+        vetoes.filter { $0 != .shortSingleToken }
+    }
     public var blocksAuto: Bool { !vetoes.isEmpty }
     public var blocksSuggest: Bool { vetoes.count >= 2 }
 

@@ -4,7 +4,7 @@ import Foundation
 ///
 /// `Bundle.module` is not used, deliberately. SwiftPM generates it as
 ///
-///     Bundle(path: Bundle.main.bundleURL/"Dodoma_DodomaCore.bundle")
+///     Bundle(path: Bundle.main.bundleURL/"Harf_DodomaCore.bundle")
 ///         ?? Bundle(path: "<absolute path into this machine's .build>")
 ///         ?? fatalError()
 ///
@@ -23,7 +23,7 @@ enum CoreResources {
     /// Marker class used to locate the bundle this code was linked into.
     private final class Token {}
 
-    static let bundleName = "Dodoma_DodomaCore.bundle"
+    static let bundleName = "Harf_DodomaCore.bundle"
 
     static func url(forResource name: String) -> URL? {
         let fileManager = FileManager.default

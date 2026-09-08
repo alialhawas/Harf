@@ -75,6 +75,10 @@ public struct CapturedKey: Equatable, Hashable, Sendable {
 /// Hardware key codes referenced by the buffer reset policy.
 /// These are layout independent: keycode 36 is Return on every keyboard layout.
 public enum Keycode {
+    /// The C of ⌘C. Layout independent like the rest: keycode 8 is the key
+    /// labelled C on an ANSI board whatever language it is currently typing,
+    /// which is what the copy chord has to press.
+    public static let c: UInt16 = 8
     public static let returnKey: UInt16 = 36
     public static let tab: UInt16 = 48
     public static let space: UInt16 = 49

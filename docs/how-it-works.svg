@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 860" width="1000" height="860">
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#5bc2ab"/></marker></defs>
+<rect x="0" y="0" width="1000" height="860" rx="16" fill="#0B0F14" stroke="#0B0F14" stroke-width="1.5"/>
+<rect x="40" y="40" width="260" height="86" rx="12" fill="#131b24" stroke="#1c242e" stroke-width="1.5"/>
+<text x="170" y="72" font-family="-apple-system,'Segoe UI',Inter,sans-serif" font-size="16" font-weight="600" fill="#f1f3f6" text-anchor="middle">You type</text>
+<text x="170" y="96" font-family="'JetBrains Mono','SF Mono',Menlo,monospace" font-size="11.5" font-weight="500" fill="#6b7585" text-anchor="middle">the right keys, wrong layout</text>
+<path d="M 300 83 L 360 83" stroke="#5bc2ab" stroke-width="1.6" fill="none" marker-end="url(#a)"/>
+<rect x="360" y="40" width="270" height="86" rx="12" fill="#131b24" stroke="#1c242e" stroke-width="1.5"/>
+<text x="495" y="72" font-family="-apple-system,'Segoe UI',Inter,sans-serif" font-size="16" font-weight="600" fill="#f1f3f6" text-anchor="middle">Event tap</text>
+<text x="495" y="96" font-family="'JetBrains Mono','SF Mono',Menlo,monospace" font-size="11.5" font-weight="500" fill="#6b7585" text-anchor="middle">stores keycodes, not letters</text>
+<path d="M 630 83 L 690 83" stroke="#5bc2ab" stroke-width="1.6" fill="none" marker-end="url(#a)"/>
+<rect x="690" y="40" width="270" height="86" rx="12" fill="#131b24" stroke="#1c242e" stroke-width="1.5"/>
+<text x="825" y="72" font-family="-apple-system,'Segoe UI',Inter,sans-serif" font-size="16" font-weight="600" fill="#f1f3f6" text-anchor="middle">Buffer</text>
+<text x="825" y="96" font-family="'JetBrains Mono','SF Mono',Menlo,monospace" font-size="11.5" font-weight="500" fill="#6b7585" text-anchor="middle">cleared on Enter, click, idle</text>
+<path d="M 825 126 L 825 168" stroke="#5bc2ab" stroke-width="1.6" fill="none" marker-end="url(#a)"/>
+<text x="837.0" y="140.0" font-family="'JetBrains Mono','SF Mono',Menlo,monospace" font-size="11.5" font-weight="500" fill="#6b7585" text-anchor="start">you pause 1s</text>
+<rect x="690" y="168" width="270" height="54" rx="12" fill="#131b24" stroke="#5bc2ab" stroke-width="1.5"/>
+<text x="825" y="200" font-family="-apple-system,'Segoe UI',Inter,sans-serif" font-size="15" font-weight="600" fill="#5bc2ab" text-anchor="middle">Evaluate</text>
+<path d="M 825 222 L 825 264" stroke="#5bc2ab" stroke-width="1.6" fill="none" marker-end="url(#a)"/>
+<rect x="40" y="264" width="920" height="44" rx="12" fill="#0e1620" stroke="#1c242e" stroke-width="1.5"/>
+<text x="500" y="292" font-family="-apple-system,'Segoe UI',Inter,sans-serif" font-size="14" font-weight="500" fill="#98a2b1" text-anchor="middle">render the same keycodes through both layouts  ·  macOS uchr tables</text>
+<rect x="120" y="340" width="360" height="92" rx="12" fill="#131b24" stroke="#3a2b2b" stroke-width="1.5"/>
+<text x="300" y="370" font-family="'JetBrains Mono','SF Mono',Menlo,monospace" font-size="11.5" font-weight="500" fill="#6b7585" text-anchor="middle">as typed  (English layout)</text>
+<text x="300" y="404" font-family="'JetBrains Mono','SF Mono',Menlo,monospace" font-size="21" font-weight="500" fill="#e88f8f" text-anchor="middle">hgsghl ugd;l</text>
+<rect x="520" y="340" width="360" height="92" rx="12" fill="#131b24" stroke="#2b3f3a" stroke-width="1.5"/>
+<text x="700" y="370" font-family="'JetBrains Mono','SF Mono',Menlo,monospace" font-size="11.5" font-weight="500" fill="#6b7585" text-anchor="middle">the other layout  (Arabic)</text>
+<text x="700" y="406" font-family="-apple-system,'Segoe UI',Inter,sans-serif" font-size="23" font-weight="600" fill="#5bc2ab" text-anchor="middle" direction="rtl">السلام عليكم</text>
+<path d="M 300 308 L 300 340" stroke="#5bc2ab" stroke-width="1.6" fill="none" marker-end="url(#a)"/>
+<path d="M 700 308 L 700 340" stroke="#5bc2ab" stroke-width="1.6" fill="none" marker-end="url(#a)"/>
+<path d="M 300 432 L 300 476" stroke="#5bc2ab" stroke-width="1.6" fill="none" marker-end="url(#a)"/>
+<path d="M 700 432 L 700 476" stroke="#5bc2ab" stroke-width="1.6" fill="none" marker-end="url(#a)"/>
+<rect x="160" y="476" width="680" height="74" rx="12" fill="#0e1620" stroke="#1c242e" stroke-width="1.5"/>
+<text x="500" y="504" font-family="-apple-system,'Segoe UI',Inter,sans-serif" font-size="14" font-weight="500" fill="#98a2b1" text-anchor="middle">score both offline  ·  letter patterns + bundled dictionaries</text>
+<text x="330" y="532" font-family="'JetBrains Mono','SF Mono',Menlo,monospace" font-size="12.5" font-weight="500" fill="#e88f8f" text-anchor="middle">as typed  0.00</text>
+<text x="500" y="532" font-family="'JetBrains Mono','SF Mono',Menlo,monospace" font-size="12.5" font-weight="600" fill="#6b7585" text-anchor="middle">·</text>
+<text x="600" y="532" font-family="'JetBrains Mono','SF Mono',Menlo,monospace" font-size="12.5" font-weight="500" fill="#5bc2ab" text-anchor="middle">other layout  0.94</text>
+<text x="790" y="532" font-family="'JetBrains Mono','SF Mono',Menlo,monospace" font-size="12.5" font-weight="600" fill="#f1f3f6" text-anchor="middle">gap 0.94</text>
+<path d="M 500 550 L 500 590" stroke="#5bc2ab" stroke-width="1.6" fill="none" marker-end="url(#a)"/>
+<path d="M 500 590 L 690 640 L 500 690 L 310 640 Z" fill="#101a24" stroke="#5bc2ab" stroke-width="1.6"/>
+<text x="500" y="636" font-family="-apple-system,'Segoe UI',Inter,sans-serif" font-size="13.5" font-weight="600" fill="#5bc2ab" text-anchor="middle">decisively better</text>
+<text x="500" y="656" font-family="-apple-system,'Segoe UI',Inter,sans-serif" font-size="13.5" font-weight="600" fill="#5bc2ab" text-anchor="middle">under the other layout?</text>
+<path d="M 310 640 L 200 640" stroke="#5bc2ab" stroke-width="1.6" fill="none" marker-end="url(#a)"/>
+<text x="255.0" y="633.0" font-family="'JetBrains Mono','SF Mono',Menlo,monospace" font-size="11.5" font-weight="500" fill="#6b7585" text-anchor="middle">no</text>
+<rect x="20" y="612" width="175" height="56" rx="12" fill="#131b24" stroke="#1c242e" stroke-width="1.5"/>
+<text x="107" y="646" font-family="-apple-system,'Segoe UI',Inter,sans-serif" font-size="14" font-weight="600" fill="#98a2b1" text-anchor="middle">leave it alone</text>
+<path d="M 500 690 L 500 730" stroke="#5bc2ab" stroke-width="1.6" fill="none" marker-end="url(#a)"/>
+<text x="512.0" y="703.0" font-family="'JetBrains Mono','SF Mono',Menlo,monospace" font-size="11.5" font-weight="500" fill="#6b7585" text-anchor="start">borderline</text>
+<rect x="360" y="730" width="280" height="56" rx="12" fill="#131b24" stroke="#4a3f28" stroke-width="1.5"/>
+<text x="500" y="764" font-family="-apple-system,'Segoe UI',Inter,sans-serif" font-size="14" font-weight="600" fill="#e6b45b" text-anchor="middle">suggestion card  ·  Tab</text>
+<path d="M 690 640 L 790 640" stroke="#5bc2ab" stroke-width="1.6" fill="none" marker-end="url(#a)"/>
+<text x="740.0" y="633.0" font-family="'JetBrains Mono','SF Mono',Menlo,monospace" font-size="11.5" font-weight="500" fill="#6b7585" text-anchor="middle">yes</text>
+<rect x="790" y="556" width="190" height="168" rx="12" fill="#131b24" stroke="#3a2b2b" stroke-width="1.5"/>
+<text x="885" y="586" font-family="'JetBrains Mono','SF Mono',Menlo,monospace" font-size="13.5" font-weight="600" fill="#e88f8f" text-anchor="middle">safety gates</text>
+<text x="885" y="614" font-family="'JetBrains Mono','SF Mono',Menlo,monospace" font-size="11.5" font-weight="500" fill="#98a2b1" text-anchor="middle">paused / app off?</text>
+<text x="885" y="638" font-family="'JetBrains Mono','SF Mono',Menlo,monospace" font-size="11.5" font-weight="500" fill="#98a2b1" text-anchor="middle">password field?</text>
+<text x="885" y="662" font-family="'JetBrains Mono','SF Mono',Menlo,monospace" font-size="11.5" font-weight="500" fill="#98a2b1" text-anchor="middle">screen agrees?</text>
+<text x="885" y="686" font-family="'JetBrains Mono','SF Mono',Menlo,monospace" font-size="11.5" font-weight="500" fill="#98a2b1" text-anchor="middle">still same app?</text>
+<path d="M 885 724 L 885 766" stroke="#5bc2ab" stroke-width="1.6" fill="none" marker-end="url(#a)"/>
+<rect x="790" y="766" width="190" height="74" rx="12" fill="#131b24" stroke="#5bc2ab" stroke-width="1.5"/>
+<text x="885" y="794" font-family="-apple-system,'Segoe UI',Inter,sans-serif" font-size="14" font-weight="600" fill="#5bc2ab" text-anchor="middle">rewrite in place</text>
+<text x="885" y="818" font-family="'JetBrains Mono','SF Mono',Menlo,monospace" font-size="11" font-weight="500" fill="#6b7585" text-anchor="middle">≈160 ms  ·  ⌥⌘Z undoes</text>
+</svg>

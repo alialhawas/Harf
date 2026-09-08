@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dodoma — Word, Sentence, or Something Else?</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&family=Cairo:wght@300;400;600;700;900&family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Tajawal:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0D1218;
+  --bg-2: #131a23;
+  --teal: #5bc2ab;
+  --teal-dim: #5bc2ab33;
+  --teal-soft: #5bc2ab14;
+  --text: #f1f3f6;
+  --text-dim: #9aa3b2;
+  --text-mute: #6b7585;
+  --line: #1f2731;
+  --line-soft: #1a222b;
+  --c-mint: #BDE6C2;
+  --c-sky: #BCDEE6;
+  --c-cream: #DBE6BC;
+  --c-peach: #E6DABC;
+  --c-rose: #E6BDBC;
+  --c-pink: #E6BCE4;
+  --c-lavender: #BCC0E6;
+  --good: #69d39a;
+  --warn: #e6c45b;
+  --bad: #e87474;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.deck { position: relative; width: 100vw; height: 100vh; overflow: hidden; }
+
+.slide {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 8vh 7vw;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(30px);
+  transition: opacity 0.55s ease, transform 0.55s ease;
+  overflow-y: auto;
+}
+.slide.active { opacity: 1; pointer-events: auto; transform: translateY(0); }
+
+.blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.32;
+  pointer-events: none;
+  z-index: 0;
+}
+.blob-1 { width: 520px; height: 520px; top: -160px; left: -160px; }
+.blob-2 { width: 420px; height: 420px; bottom: -130px; right: -110px; opacity: 0.22; }
+
+.chapter-tag {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-dim);
+  letter-spacing: 1.5px;
+  margin-bottom: 22px;
+  z-index: 2;
+  text-transform: uppercase;
+}
+.chapter-tag::before { content: ''; width: 32px; height: 1px; background: var(--teal); }
+.chapter-tag .num { color: var(--teal); font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+
+.headline {
+  position: relative;
+  font-weight: 800;
+  font-size: clamp(40px, 5.4vw, 78px);
+  line-height: 1.08;
+  letter-spacing: -1.5px;
+  margin-bottom: 22px;
+  z-index: 2;
+  max-width: 1200px;
+}
+.headline.compact { font-size: clamp(32px, 3.6vw, 52px); }
+.headline .accent { color: var(--teal); }
+
+.lead {
+  position: relative;
+  font-size: clamp(16px, 1.35vw, 22px);
+  line-height: 1.6;
+  color: var(--text-dim);
+  max-width: 1000px;
+  font-weight: 400;
+  z-index: 2;
+  margin-bottom: 18px;
+}
+.lead strong { color: var(--text); font-weight: 600; }
+
+.bullets { position: relative; list-style: none; margin-top: 22px; z-index: 2; max-width: 1100px; }
+.bullets li {
+  font-size: clamp(15px, 1.15vw, 19px);
+  line-height: 1.5;
+  padding: 12px 0 12px 26px;
+  position: relative;
+  color: var(--text);
+  font-weight: 400;
+  border-bottom: 1px solid var(--line);
+}
+.bullets li:last-child { border-bottom: none; }
+.bullets li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 22px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--teal);
+}
+.bullets li strong { color: var(--teal); font-weight: 700; }
+.bullets.compact li { font-size: clamp(13px, 0.95vw, 16px); padding: 8px 0 8px 22px; line-height: 1.45; }
+.bullets.compact li::before { top: 16px; width: 7px; height: 7px; }
+
+.hud {
+  position: fixed; top: 28px; left: 0; right: 0;
+  padding: 0 7vw;
+  display: flex; justify-content: space-between; align-items: center;
+  z-index: 100; pointer-events: none;
+}
+.brand {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  color: var(--text-dim);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  display: flex; align-items: center; gap: 10px;
+}
+.brand::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 12px var(--teal); }
+.counter { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--text-dim); letter-spacing: 2px; }
+.counter .current { color: var(--teal); font-weight: 600; }
+
+.dots {
+  position: fixed; right: 24px; top: 50%; transform: translateY(-50%);
+  display: flex; flex-direction: column; gap: 10px;
+  z-index: 100;
+}
+.dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--line);
+  border: none; cursor: pointer; padding: 0;
+  transition: all 0.3s ease;
+}
+.dot.active { background: var(--teal); transform: scale(1.4); }
+.dot:hover { background: var(--text-dim); }
+
+.cover { align-items: flex-start; justify-content: center; }
+.cover-title {
+  font-weight: 900;
+  font-size: clamp(54px, 8.5vw, 130px);
+  line-height: 1;
+  letter-spacing: -3px;
+  background: linear-gradient(135deg, #fff 0%, var(--teal) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 26px;
+  position: relative; z-index: 2;
+  max-width: 1200px;
+}
+.cover-subtitle {
+  font-size: clamp(20px, 2vw, 32px);
+  font-weight: 400;
+  color: var(--text-dim);
+  position: relative; z-index: 2;
+  max-width: 900px;
+  line-height: 1.4;
+}
+.cover-tag {
+  margin-top: 50px;
+  display: flex; align-items: center; gap: 16px;
+  color: var(--text-mute);
+  font-size: 14px;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 1.5px;
+  position: relative; z-index: 2;
+  text-transform: uppercase;
+}
+.cover-tag-line { width: 60px; height: 1px; background: var(--text-mute); }
+
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 50px; align-items: start; position: relative; z-index: 2; }
+.two-col.lean-left  { grid-template-columns: 1.1fr 0.9fr; }
+.two-col.lean-right { grid-template-columns: 0.9fr 1.1fr; }
+
+.card {
+  background: rgba(255,255,255,0.025);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 22px 24px;
+  backdrop-filter: blur(8px);
+  position: relative; z-index: 2;
+}
+.card-title {
+  font-weight: 700;
+  font-size: clamp(15px, 1.1vw, 18px);
+  color: var(--teal);
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+  letter-spacing: 0.5px;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.card-title .badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-mute);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.card-body { color: var(--text); font-size: clamp(13px, 0.95vw, 15px); line-height: 1.6; }
+.card-body strong { color: var(--teal); font-weight: 600; }
+
+.grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; position: relative; z-index: 2; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; position: relative; z-index: 2; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; position: relative; z-index: 2; }
+
+.qa-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: clamp(12px, 0.92vw, 15px);
+  position: relative; z-index: 2;
+  background: rgba(255,255,255,0.015);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.qa-table thead { background: rgba(91,194,171,0.08); }
+.qa-table th {
+  text-align: left;
+  padding: 14px 18px;
+  font-weight: 600;
+  color: var(--teal);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--line);
+}
+.qa-table td {
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--text);
+  vertical-align: top;
+}
+.qa-table td.metric { font-weight: 600; color: var(--teal); font-family: 'JetBrains Mono', monospace; font-size: 13px; }
+.qa-table tr:last-child td { border-bottom: none; }
+.qa-table tr:hover td { background: rgba(255,255,255,0.02); }
+.pill {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: 'JetBrains Mono', monospace;
+}
+.pill.good { background: rgba(105,211,154,0.12); color: var(--good); }
+.pill.warn { background: rgba(230,196,91,0.12); color: var(--warn); }
+.pill.bad  { background: rgba(232,116,116,0.14); color: var(--bad); }
+
+.formula {
+  font-family: 'JetBrains Mono', monospace;
+  background: rgba(91,194,171,0.05);
+  border: 1px solid var(--teal-dim);
+  border-radius: 10px;
+  padding: 16px 20px;
+  color: var(--text);
+  font-size: clamp(13px, 1vw, 16px);
+  line-height: 1.7;
+  margin: 14px 0;
+  position: relative; z-index: 2;
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+.formula .var { color: var(--teal); font-weight: 600; }
+.formula .comment { color: var(--text-mute); }
+
+.src {
+  display: inline-block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-mute);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--text-mute);
+  margin: 0 2px;
+  letter-spacing: 0.3px;
+}
+.src:hover { color: var(--teal); border-color: var(--teal); }
+
+.sources-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px 28px;
+  position: relative; z-index: 2;
+  max-width: 1500px;
+  margin-top: 18px;
+}
+.sources-grid a {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-decoration: none;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line-soft);
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+}
+.sources-grid a:hover { color: var(--teal); }
+.sources-grid a .ref { color: var(--teal); font-weight: 600; min-width: 100px; }
+.sources-grid a .lbl { flex: 1; }
+
+.stat-tile {
+  background: rgba(255,255,255,0.025);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 20px 22px;
+}
+.stat-tile .stat-num {
+  font-size: clamp(28px, 3vw, 44px);
+  font-weight: 800;
+  color: var(--teal);
+  line-height: 1.1;
+  margin-bottom: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: -1px;
+}
+.stat-tile .stat-label { font-size: 13px; color: var(--text-dim); font-weight: 500; }
+.stat-tile .stat-note { font-size: 12px; color: var(--text-mute); margin-top: 8px; line-height: 1.5; }
+
+.diagram {
+  background: rgba(15, 28, 26, 0.55);
+  border: 1px solid rgba(91, 194, 171, 0.15);
+  border-radius: 16px;
+  padding: 24px;
+  backdrop-filter: blur(8px);
+  position: relative; z-index: 2;
+  margin-top: 20px;
+}
+.diagram-label {
+  color: var(--teal);
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  margin-bottom: 16px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.diagram svg { width: 100%; height: auto; display: block; }
+
+.layer-stack { display: flex; flex-direction: column; gap: 12px; position: relative; z-index: 2; margin-top: 20px; }
+.layer-row {
+  display: grid;
+  grid-template-columns: 110px 1fr 160px;
+  gap: 24px;
+  align-items: center;
+  padding: 18px 22px;
+  background: rgba(255,255,255,0.025);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--teal);
+  border-radius: 12px;
+}
+.layer-row .layer-num { font-family: 'JetBrains Mono', monospace; color: var(--teal); font-size: 13px; font-weight: 600; letter-spacing: 1.5px; }
+.layer-row .layer-name { font-size: clamp(15px, 1.15vw, 19px); font-weight: 600; color: var(--text); }
+.layer-row .layer-desc { font-size: clamp(12px, 0.85vw, 14px); color: var(--text-dim); margin-top: 4px; }
+.layer-row .layer-tools { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-mute); text-align: right; line-height: 1.6; }
+
+/* Default slide blob colors — duplicate + override per slide for variety */
+#slide-1 .blob-1 { background: var(--teal); opacity: 0.4; }
+#slide-1 .blob-2 { background: var(--c-sky); }
+
+/* Stagger animations */
+.slide.active .chapter-tag { animation: rise 0.6s ease 0.1s both; }
+.slide.active .headline { animation: rise 0.6s ease 0.2s both; }
+.slide.active .lead { animation: rise 0.6s ease 0.3s both; }
+.slide.active .cover-title { animation: rise 0.8s ease 0.1s both; }
+.slide.active .cover-subtitle { animation: rise 0.8s ease 0.3s both; }
+.slide.active .cover-tag { animation: rise 0.8s ease 0.5s both; }
+.slide.active .qa-table,
+.slide.active .formula,
+.slide.active .diagram,
+.slide.active .layer-stack,
+.slide.active .grid-2,
+.slide.active .grid-3,
+.slide.active .grid-4,
+.slide.active .sources-grid { animation: rise 0.6s ease 0.4s both; }
+.slide.active .bullets li:nth-child(1) { animation: rise 0.6s ease 0.4s both; }
+.slide.active .bullets li:nth-child(2) { animation: rise 0.6s ease 0.5s both; }
+.slide.active .bullets li:nth-child(3) { animation: rise 0.6s ease 0.6s both; }
+.slide.active .bullets li:nth-child(4) { animation: rise 0.6s ease 0.7s both; }
+.slide.active .bullets li:nth-child(5) { animation: rise 0.6s ease 0.75s both; }
+.slide.active .bullets li:nth-child(6) { animation: rise 0.6s ease 0.8s both; }
+
+@keyframes rise { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
+
+.thanks { align-items: center; justify-content: center; text-align: center; }
+.thanks .headline { text-align: center; }
+.thanks .lead { text-align: center; margin-left: auto; margin-right: auto; }
+
+@media (max-width: 1100px) {
+  .slide { padding: 10vh 5vw; }
+  .two-col, .two-col.lean-left, .two-col.lean-right { grid-template-columns: 1fr; gap: 28px; }
+  .grid-3, .grid-4 { grid-template-columns: 1fr 1fr; }
+  .layer-row { grid-template-columns: 80px 1fr; }
+  .layer-row .layer-tools { display: none; }
+  .sources-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<div class="hud">
+  <div class="brand">DODOMA · CAPTURE</div>
+  <div class="counter"><span class="current">01</span> / <span class="total">03</span></div>
+</div>
+
+<div class="deck">
+
+  <!-- 01 -->
+  <section class="slide cover active" id="slide-1">
+    <div class="blob blob-1"></div><div class="blob blob-2"></div>
+    <h1 class="cover-title">Word, or<br>sentence?</h1>
+    <p class="cover-subtitle">How Dodoma captures what you type, where it decides a mistake begins, and why it is neither one word at a time nor the whole line.</p>
+    <div class="cover-tag"><div class="cover-tag-line"></div><span>10 SLIDES · CAPTURE &amp; SEGMENTATION</span></div>
+  </section>
+
+  <!-- 02 -->
+  <section class="slide" id="slide-2">
+    <div class="blob blob-1"></div><div class="blob blob-2"></div>
+    <div class="chapter-tag"><span class="num">00</span><span>The Short Answer</span></div>
+    <h1 class="headline compact">Neither. It fixes a <span class="accent">trailing run.</span></h1>
+    <p class="lead">Both obvious answers are wrong, and each fails in a way you would notice immediately.</p>
+    <div class="grid-3" style="margin-top: 20px;">
+      <div class="card">
+        <div class="card-title">Word by word <span class="badge">TOO SMALL</span></div>
+        <div class="card-body">One word is barely any evidence. <span style="font-family:'JetBrains Mono',monospace;">hs</span> is meaningless in both languages; <span style="font-family:'JetBrains Mono',monospace;">ha</span> is real in one. Judging words alone means constant wrong calls on short ones.</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Whole line <span class="badge">TOO BIG</span></div>
+        <div class="card-body">You often write in both languages in one line. Rewriting everything would destroy the half that was already correct.</div>
+      </div>
+      <div class="card" style="border-left: 3px solid var(--teal);">
+        <div class="card-title">A trailing run <span class="badge">USED</span></div>
+        <div class="card-body">Start at the caret, walk backwards while the evidence holds, and rewrite only that stretch. Everything before it is left untouched.</div>
+      </div>
+    </div>
+    <p class="lead" style="margin-top:20px;">The run always ends at the <strong>caret</strong> — never in the middle of the line — because the fix is performed with backspaces, which can only delete backwards from where you are.</p>
+  </section>
+
+  <!-- 03 -->
+  <section class="slide" id="slide-3">
+    <div class="chapter-tag"><span class="num">01</span><span>Capture</span></div>
+    <div class="blob blob-1"></div><div class="blob blob-2"></div>
+    <h1 class="headline compact">It stores <span class="accent">keys</span>, not words.</h1>
+    <p class="lead">Nothing is read off your screen. A system-wide event tap records each keystroke as it happens, and for each one keeps four things:</p>
+    <table class="qa-table" style="margin-top: 14px;">
+      <thead><tr><th style="width:24%">Field</th><th style="width:30%">Example</th><th>Why it is needed</th></tr></thead>
+      <tbody>
+        <tr><td class="metric">keycode</td><td><span style="font-family:'JetBrains Mono',monospace;">4</span></td><td>The physical key. Identical in both layouts — this is what makes the original intent recoverable.</td></tr>
+        <tr><td class="metric">modifiers</td><td><span style="font-family:'JetBrains Mono',monospace;">shift, caps</span></td><td>Caps Lock and Shift produce different Arabic output; both must be replayable.</td></tr>
+        <tr><td class="metric">produced text</td><td><span style="font-family:'JetBrains Mono',monospace;">"h"</span></td><td>What actually landed on screen, so the delete count is exact.</td></tr>
+        <tr><td class="metric">timestamp</td><td><span style="font-family:'JetBrains Mono',monospace;">…8412</span></td><td>Drives the one-second pause that triggers evaluation.</td></tr>
+      </tbody>
+    </table>
+    <p class="lead" style="margin-top:18px;">Nothing is written to disk and nothing leaves the machine. The buffer holds at most <strong>200 keys</strong> and lives only in memory.</p>
+  </section>
+
+  <!-- 04 -->
+  <section class="slide" id="slide-4">
+    <div class="chapter-tag"><span class="num">02</span><span>Boundaries</span></div>
+    <div class="blob blob-1"></div><div class="blob blob-2"></div>
+    <h1 class="headline compact">Thirteen ways the buffer <span class="accent">empties.</span></h1>
+    <p class="lead">The buffer is not "everything you typed today" — it is the current thought. Anything that means you moved on clears it, and after a clear there is nothing to fix.</p>
+    <div class="grid-3" style="margin-top: 18px;">
+      <div class="card">
+        <div class="card-title">You moved the caret</div>
+        <div class="card-body"><ul class="bullets compact" style="margin:6px 0;">
+          <li><strong>Return</strong> — sent the message</li>
+          <li><strong>Tab</strong>, <strong>Escape</strong></li>
+          <li>Arrow keys, Home, End, Page keys</li>
+          <li>A <strong>mouse click</strong> anywhere</li>
+        </ul></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Context changed</div>
+        <div class="card-body"><ul class="bullets compact" style="margin:6px 0;">
+          <li>Switched <strong>app</strong> or focus</li>
+          <li>Changed <strong>input source</strong></li>
+          <li>A ⌘ or ⌃ <strong>shortcut</strong></li>
+          <li><strong>10 seconds</strong> of not typing</li>
+        </ul></div>
+      </div>
+      <div class="card" style="border-left: 3px solid var(--teal);">
+        <div class="card-title">Safety</div>
+        <div class="card-body"><ul class="bullets compact" style="margin:6px 0;">
+          <li><strong>Secure input</strong> — also purges the keystroke log</li>
+          <li>Buffer <strong>overflow</strong> past 200 keys</li>
+          <li>After a fix is applied</li>
+        </ul></div>
+      </div>
+    </div>
+    <p class="lead" style="margin-top:18px;">This is why nothing happens in a chat box when you type and press <strong>Return</strong> straight away: sending clears the buffer before the one-second pause ever arrives.</p>
+  </section>
+
+  <!-- 05 -->
+  <section class="slide" id="slide-5">
+    <div class="chapter-tag"><span class="num">03</span><span>Tokens</span></div>
+    <div class="blob blob-1"></div><div class="blob blob-2"></div>
+    <h1 class="headline compact">Words are just <span class="accent">spaces</span> in the key stream.</h1>
+    <p class="lead">On the pause, the buffered keys are split on whitespace keys. No dictionary is consulted yet — a "word" at this stage is only a run of keys between two spaces.</p>
+    <div class="diagram" style="margin-top: 18px;">
+      <div class="diagram-label">buffer → tokens · the region always reaches the caret</div>
+      <svg viewBox="0 0 1240 150" xmlns="http://www.w3.org/2000/svg">
+        <defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#5bc2ab"/></marker></defs>
+        <rect x="20" y="40" width="230" height="62" rx="10" fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.12)"/>
+        <text x="135" y="68" text-anchor="middle" fill="#9aa3b2" font-family="JetBrains Mono" font-size="14">صاشف</text>
+        <text x="135" y="88" text-anchor="middle" fill="#6b7585" font-family="JetBrains Mono" font-size="11">token 1</text>
+        <rect x="270" y="40" width="180" height="62" rx="10" fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.12)"/>
+        <text x="360" y="68" text-anchor="middle" fill="#9aa3b2" font-family="JetBrains Mono" font-size="14">هس</text>
+        <text x="360" y="88" text-anchor="middle" fill="#6b7585" font-family="JetBrains Mono" font-size="11">token 2</text>
+        <rect x="470" y="40" width="180" height="62" rx="10" fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.12)"/>
+        <text x="560" y="68" text-anchor="middle" fill="#9aa3b2" font-family="JetBrains Mono" font-size="14">حق</text>
+        <text x="560" y="88" text-anchor="middle" fill="#6b7585" font-family="JetBrains Mono" font-size="11">token 3</text>
+        <rect x="670" y="40" width="230" height="62" rx="10" fill="rgba(91,194,171,0.08)" stroke="#5bc2ab" stroke-width="2"/>
+        <text x="785" y="68" text-anchor="middle" fill="#fff" font-family="JetBrains Mono" font-size="14">يختس</text>
+        <text x="785" y="88" text-anchor="middle" fill="rgba(91,194,171,0.9)" font-family="JetBrains Mono" font-size="11">token 4</text>
+        <path d="M 920 71 L 985 71" stroke="#5bc2ab" stroke-width="1.5" fill="none" marker-end="url(#a2)"/>
+        <text x="1090" y="66" text-anchor="middle" fill="#fff" font-family="Inter" font-weight="600" font-size="15">caret</text>
+        <text x="1090" y="88" text-anchor="middle" fill="#6b7585" font-family="JetBrains Mono" font-size="11">walk starts here</text>
+      </svg>
+    </div>
+    <p class="lead" style="margin-top:16px;">Trailing spaces belong to the region too. If you typed a space after the last word, the fix must delete it and retype it — otherwise the count would be off by one and the correction would land in the wrong place.</p>
+  </section>
+
+  <!-- 06 -->
+  <section class="slide" id="slide-6">
+    <div class="chapter-tag"><span class="num">04</span><span>The Walk</span></div>
+    <div class="blob blob-1"></div><div class="blob blob-2"></div>
+    <h1 class="headline compact">Backwards from the caret, <span class="accent">one word at a time.</span></h1>
+    <p class="lead">This is the part that <em>is</em> word by word. Starting at the last token and moving left, each word is asked one question — and the walk continues only while the answer keeps coming back the same way.</p>
+    <div class="layer-stack" style="margin-top:16px;">
+      <div class="layer-row">
+        <div class="layer-num">TAKE</div>
+        <div><div class="layer-name">This word reads better under the other layout</div>
+        <div class="layer-desc">Added to the run; keep walking left.</div></div>
+        <div class="layer-tools">alt &gt; current</div>
+      </div>
+      <div class="layer-row">
+        <div class="layer-num">STEP OVER</div>
+        <div><div class="layer-name">One letter long</div>
+        <div class="layer-desc">A single letter scores the same in both languages, so it is evidence of nothing. It cannot start a run, but it must not end one either.</div></div>
+        <div class="layer-tools">ties ignored</div>
+      </div>
+      <div class="layer-row">
+        <div class="layer-num">STOP</div>
+        <div><div class="layer-name">A real word of the language on screen</div>
+        <div class="layer-desc">Presumed deliberate. The run ends here — and this is where the interesting failure lives.</div></div>
+        <div class="layer-tools">dict ≥ 0.5</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 07 -->
+  <section class="slide" id="slide-7">
+    <div class="chapter-tag"><span class="num">05</span><span>The Failure</span></div>
+    <div class="blob blob-1"></div><div class="blob blob-2"></div>
+    <h1 class="headline compact">When a real word appears <span class="accent">by accident.</span></h1>
+    <p class="lead">Typing <span style="font-family:'JetBrains Mono',monospace;">what is pr dojs</span> on the Arabic layout produces four Arabic tokens. Three are nonsense — but <span style="font-size:19px;">حق</span> is a genuine Arabic word, scoring <strong>1.00</strong> dictionary coverage.</p>
+    <div class="two-col" style="margin-top: 18px;">
+      <div>
+        <div class="formula"><span class="comment"># the walk, right to left</span>
+يختس   <span class="var">take</span>    dojs
+حق     <span class="var">STOP</span>    real Arabic word
+هس     ·       never reached
+صاشف   ·       never reached</div>
+        <p style="font-size: 13px; color: var(--text-dim); margin-top: 12px; line-height:1.6;">The run became one four-letter token — under the six-letter minimum to rewrite — so the line was merely offered as a suggestion and stayed wrong.</p>
+      </div>
+      <div>
+        <div class="card">
+          <div class="card-title">What you saw <span class="badge">BUG</span></div>
+          <div class="card-body">
+            <p style="font-family:'JetBrains Mono',monospace;margin:0 0 10px;">صاشف هس حق يختس</p>
+            <p style="margin:0;">A wall went up in the middle of one English sentence, because a rule meant to protect bilingual writing cannot tell a deliberate Arabic word from an accidental one.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 08 -->
+  <section class="slide" id="slide-8">
+    <div class="chapter-tag"><span class="num">06</span><span>The Fix</span></div>
+    <div class="blob blob-1"></div><div class="blob blob-2"></div>
+    <h1 class="headline compact">Ask the question about the <span class="accent">whole run.</span></h1>
+    <p class="lead">Where the walk stops, the run it produced is now scored as a whole and compared against each longer run. The longer one is taken only if it reads clearly better under the other layout.</p>
+    <table class="qa-table" style="margin-top: 14px;">
+      <thead><tr><th style="width:34%">Buffer</th><th>Stop at the word</th><th>Reach past it</th><th style="width:24%">Chosen</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="metric">صاشف هس حق يختس</td>
+          <td><span class="pill">0.40</span></td>
+          <td><span class="pill good">0.60</span></td>
+          <td>whole run → <strong>what is pr dojs</strong></td>
+        </tr>
+        <tr>
+          <td class="metric">check this hgsghl</td>
+          <td><span class="pill good">0.91</span></td>
+          <td><span class="pill bad">−0.23</span></td>
+          <td>last word only → <strong>السلام</strong></td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="lead" style="margin-top:18px;">The same number settles both. Pulling real English into the region <strong>destroys</strong> its score, so bilingual text is protected by arithmetic rather than by a rule that has to guess which words you meant.</p>
+  </section>
+
+  <!-- 09 -->
+  <section class="slide" id="slide-9">
+    <div class="chapter-tag"><span class="num">07</span><span>Scoring</span></div>
+    <div class="blob blob-1"></div><div class="blob blob-2"></div>
+    <h1 class="headline compact">A run is scored as <span class="accent">one piece of text.</span></h1>
+    <p class="lead">Once the run is chosen, its two readings are scored whole — not word by word — so a single odd word cannot swing the verdict on its own.</p>
+    <div class="grid-2" style="margin-top:20px;">
+      <div class="card">
+        <div class="card-title">صاشف هس حق يختس <span class="badge">AS TYPED</span></div>
+        <div class="card-body">
+          <table class="qa-table" style="margin-top:4px;"><tbody>
+            <tr><td class="metric">letter pairs</td><td>0.390</td></tr>
+            <tr><td class="metric">real words</td><td>0.056</td></tr>
+            <tr><td class="metric">combined</td><td><span class="pill bad">0.239</span></td></tr>
+          </tbody></table>
+          <p style="font-size:12px;color:var(--text-mute);margin-top:8px;">Only حق counts — one accidental word in four.</p>
+        </div>
+      </div>
+      <div class="card" style="border-left:3px solid var(--teal);">
+        <div class="card-title">what is pr dojs <span class="badge">OTHER LAYOUT</span></div>
+        <div class="card-body">
+          <table class="qa-table" style="margin-top:4px;"><tbody>
+            <tr><td class="metric">letter pairs</td><td>0.756</td></tr>
+            <tr><td class="metric">real words</td><td>0.944</td></tr>
+            <tr><td class="metric">combined</td><td><span class="pill good">0.841</span></td></tr>
+          </tbody></table>
+          <p style="font-size:12px;color:var(--text-mute);margin-top:8px;">"what" and "is" carry it; "pr" and "dojs" are not words and it still wins.</p>
+        </div>
+      </div>
+    </div>
+    <p class="lead" style="margin-top:20px;">Gap <strong>0.60</strong>, against the <strong>0.40</strong> a silent rewrite requires — so it acts without asking.</p>
+  </section>
+
+  <!-- 10 -->
+  <section class="slide" id="slide-10">
+    <div class="chapter-tag"><span class="num">08</span><span>In One Sentence</span></div>
+    <div class="blob blob-1"></div><div class="blob blob-2"></div>
+    <h1 class="headline compact">Words find the edge. <span class="accent">The run makes the call.</span></h1>
+    <p class="lead">Both levels are used, and each does the job the other cannot.</p>
+    <div class="grid-2" style="margin-top: 20px;">
+      <div class="card">
+        <div class="card-title">Word level <span class="badge">WHERE</span></div>
+        <div class="card-body">Walking backwards word by word is how the boundary is found — how far back the mistake goes, and where deliberate text begins.</div>
+      </div>
+      <div class="card" style="border-left:3px solid var(--teal);">
+        <div class="card-title">Run level <span class="badge">WHETHER</span></div>
+        <div class="card-body">Scoring the whole run is how the decision is made — rewrite silently, offer a suggestion, or do nothing at all.</div>
+      </div>
+    </div>
+    <p class="lead" style="margin-top:22px;">And the run is never longer than what you typed since your last pause, click, or Return — so a fix can only ever reach back into the sentence you are still in the middle of.</p>
+  </section>
+
+</div>
+
+<nav class="dots" id="dots"></nav>
+
+<script>
+const slides = document.querySelectorAll('.slide');
+const dotsContainer = document.getElementById('dots');
+const counterCurrent = document.querySelector('.counter .current');
+const counterTotal = document.querySelector('.counter .total');
+const total = slides.length;
+let current = 0;
+
+counterTotal.textContent = String(total).padStart(2, '0');
+
+slides.forEach((_, i) => {
+  const dot = document.createElement('button');
+  dot.className = 'dot' + (i === 0 ? ' active' : '');
+  dot.setAttribute('aria-label', `Go to slide ${i + 1}`);
+  dot.addEventListener('click', () => goTo(i));
+  dotsContainer.appendChild(dot);
+});
+const dots = document.querySelectorAll('.dot');
+
+function goTo(index) {
+  if (index < 0 || index >= total || index === current) return;
+  slides[current].classList.remove('active');
+  dots[current].classList.remove('active');
+  current = index;
+  slides[current].classList.add('active');
+  dots[current].classList.add('active');
+  counterCurrent.textContent = String(current + 1).padStart(2, '0');
+  slides[current].scrollTop = 0;
+}
+
+function next() { goTo(current + 1); }
+function prev() { goTo(current - 1); }
+
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  switch (e.key) {
+    case 'ArrowRight': case 'ArrowDown': case 'PageDown': case ' ':
+      e.preventDefault(); next(); break;
+    case 'ArrowLeft': case 'ArrowUp': case 'PageUp':
+      e.preventDefault(); prev(); break;
+    case 'Home': goTo(0); break;
+    case 'End': goTo(total - 1); break;
+    case 'Escape': goTo(0); break;
+  }
+  if (e.key >= '1' && e.key <= '9') goTo(parseInt(e.key) - 1);
+});
+
+document.querySelectorAll('.slide').forEach(slide => {
+  slide.addEventListener('click', (e) => {
+    if (e.target.closest('a, button, input, .dots, table, .card, .formula, .diagram')) return;
+    next();
+  });
+});
+</script>
+
+</body>
+</html>

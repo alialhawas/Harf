@@ -28,9 +28,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The one piece of state the event tap thread, the pipeline queue and the
     /// main thread all touch. Created here so no one of the three owns it.
     private let suggestionState = SuggestionState()
+    /// The rectangles of the cards whose clicks are not input. One registry,
+    /// because a second would be a second set of rectangles that can disagree
+    /// with the first about where a card is.
+    private let cardFrames = CardFrames()
+    /// Owned here, not by the pipeline, because the settings window reads and
+    /// edits the same words and both must see one file.
+    private let lexicon = UserLexicon(url: UserLexicon.defaultURL())
+    private var learnedController: LearnedController?
+    private var flipController: FlipController?
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
-        Log.app.info("Dodoma \(DodomaCore.Dodoma.version, privacy: .public) starting")
+        Log.app.info("Harf \(DodomaCore.Dodoma.version, privacy: .public) starting")
 
         preloadLanguageModels()
 
@@ -43,7 +52,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             debugWindow?.show()
         }
 
-        let settingsWindow = SettingsWindowController(settings: settings)
+        let settingsWindow = SettingsWindowController(settings: settings, lexicon: lexicon)
         settingsWindowController = settingsWindow
         controller.onShowSettings = { [weak settingsWindow] in
             settingsWindow?.show()
@@ -59,7 +68,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let pipeline = TypingPipeline(
             settings: settings, frontmost: frontmost, secureInput: secureInput,
-            suggestionState: suggestionState)
+            suggestionState: suggestionState, cardFrames: cardFrames, lexicon: lexicon)
 
         // The panel borrows the pipeline's accessibility oracle rather than
         // making a second one: the caret lookup and the security check have to
@@ -69,6 +78,30 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         suggestionController = suggestions
         suggestions.onTimeout = { [weak pipeline] in
             pipeline?.suggestionTimedOut()
+        }
+
+        // Shares the pipeline's oracle for the same reason the suggestion panel
+        // does: one serial queue for every accessibility call.
+        let learned = LearnedController(oracle: pipeline.focusOracle, cards: cardFrames)
+        learnedController = learned
+        pipeline.onWordsLearned = { [weak self, weak learned] words, language, pid in
+            guard let self else { return }
+            learned?.show(words: words, language: language, pid: pid) { [weak self] in
+                guard let self else { return }
+                for word in words { self.lexicon.remove(word, language: language) }
+                _ = self.lexicon.save()
+                Log.app.info("\(words.count, privacy: .public) learned words undone")
+            }
+        }
+
+        // Shares the pipeline's oracle for the same reason the suggestion panel
+        // does: one serial queue for every accessibility call.
+        let flips = FlipController(oracle: pipeline.focusOracle, cards: cardFrames)
+        flipController = flips
+        pipeline.onFlipApplied = { [weak self, weak flips] flip, pid in
+            flips?.show(flip: flip, pid: pid) { [weak self] in
+                self?.learn(from: flip)
+            }
         }
 
         pipeline.onChange = { [weak debugWindow] snapshot in
@@ -104,6 +137,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             // greyed-out one.
             pipeline?.canUndo() ?? false
         }
+        controller.onFlip = { [weak pipeline] in
+            pipeline?.flipSelection()
+        }
+        controller.isFlipAvailable = { [weak pipeline] in
+            pipeline?.canFlip() ?? false
+        }
 
         // Carbon, not the event tap: the shortcut has to work in exactly the
         // situations where the tap does not. See `HotkeyCenter`.
@@ -116,11 +155,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 // blob and the pipeline all move together.
                 self?.menuBarController?.togglePause()
                 self?.menuBarController?.showPauseChanged(paused: self?.settings.paused ?? false)
+            case .flipSelection:
+                self?.pipeline?.flipSelection()
             }
         }
         hotkeys.register()
         if !hotkeys.registeredActions.contains(.undoLastFix) {
             controller.clearUndoShortcut()
+        }
+        if !hotkeys.registeredActions.contains(.flipSelection) {
+            controller.clearFlipShortcut()
         }
 
         // Both halves of the safety layer feed the pipeline the same way: a
@@ -194,6 +238,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public func applicationWillTerminate(_ notification: Notification) {
+        // What was learned this session outlives it.
+        pipeline?.lexicon.save()
+
         pollTimer?.invalidate()
         pollTimer = nil
         hotkeys.unregister()
@@ -201,6 +248,26 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         secureInput.stop()
         eventTap?.stop()
         pipeline?.stop()
+    }
+
+    /// Takes the flip card's Learn button at its word: the flipped reading was
+    /// right, so its words belong to the language it was flipped into and the
+    /// words that were counted for the other one were noise.
+    private func learn(from flip: Flip) {
+        let plan = FlipLearning.plan(
+            for: flip,
+            target: LanguageModel.shared(flip.targetLanguage),
+            source: LanguageModel.shared(flip.sourceLanguage))
+        for word in plan.add { lexicon.add(word, language: flip.targetLanguage) }
+        for word in plan.forget { lexicon.forgetCount(word, language: flip.sourceLanguage) }
+        // Not `save()`: this runs on the main thread, from a button press, and
+        // a synchronous write of the whole lexicon would stall the cursor.
+        // Interval 0 makes it due now, and the write itself happens on the
+        // lexicon's own IO queue.
+        lexicon.saveIfDue(interval: 0)
+        Log.app.info(
+            "flip learned: \(plan.add.count, privacy: .public) added, \(plan.forget.count, privacy: .public) forgotten"
+        )
     }
 
     /// The tables are ~800 KB of JSON and word lists. Loading them here, off

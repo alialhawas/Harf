@@ -20,6 +20,17 @@ struct AppPolicyRow: Identifiable, Equatable {
     }
 }
 
+/// One word in the vocabulary tab, promoted or still counting.
+struct VocabularyRow: Identifiable, Equatable {
+    var id: String { word }
+    let word: String
+    let count: Int
+    /// Already treated as a real word rather than still accumulating.
+    let promoted: Bool
+    /// Added by hand, so it never had to reach the threshold.
+    let manual: Bool
+}
+
 /// Main-thread mirror of the settings blob, plus the two things that live
 /// outside it: the login-item registration and the resolved app names.
 ///
@@ -32,11 +43,18 @@ final class SettingsModel: ObservableObject {
     @Published private(set) var policyRows: [AppPolicyRow] = []
     @Published private(set) var skipRows: [AppPolicyRow] = []
     @Published private(set) var loginStatus: LoginItemStatus = .disabled
+    @Published private(set) var vocabRows: [VocabularyRow] = []
+    /// Which language's words the vocabulary tab is showing.
+    @Published var vocabLanguage: Language = .english {
+        didSet { if vocabLanguage != oldValue { rebuildVocabulary() } }
+    }
 
     private let store: SettingsStore
+    private let lexicon: UserLexicon
 
-    init(store: SettingsStore) {
+    init(store: SettingsStore, lexicon: UserLexicon) {
         self.store = store
+        self.lexicon = lexicon
         settings = store.settings
         // The rows are deliberately not built here. This model is created at
         // launch for a window that may never be opened, and building them costs
@@ -52,7 +70,52 @@ final class SettingsModel: ObservableObject {
     func refresh() {
         settings = store.settings
         rebuildRows()
+        rebuildVocabulary()
         refreshLoginStatus()
+    }
+
+    /// Rebuilt on show and after every edit, never continuously: words are
+    /// counted on the typing queue and a list that renumbered itself while
+    /// being read would be worse than one that is a few seconds old.
+    private func rebuildVocabulary() {
+        let language = vocabLanguage
+        let manual = Set(lexicon.manualWords(language))
+        let known = lexicon.learned(language).map {
+            VocabularyRow(
+                word: $0.word, count: $0.count, promoted: true,
+                manual: manual.contains($0.word))
+        }
+        // Manual entries never accumulate a count, so `learned` cannot see
+        // them; without this they would vanish the moment they were added.
+        let listed = Set(known.map(\.word))
+        let byHand = manual.subtracting(listed).sorted().map {
+            VocabularyRow(word: $0, count: 0, promoted: true, manual: true)
+        }
+        let waiting = lexicon.pending(language).map {
+            VocabularyRow(word: $0.word, count: $0.count, promoted: false, manual: false)
+        }
+        vocabRows = known + byHand + waiting
+    }
+
+    // MARK: - Vocabulary
+
+    func addWord(_ word: String) {
+        let trimmed = word.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        lexicon.add(trimmed, language: vocabLanguage)
+        _ = lexicon.save()
+        rebuildVocabulary()
+    }
+
+    func removeWord(_ word: String) {
+        lexicon.remove(word, language: vocabLanguage)
+        _ = lexicon.save()
+        rebuildVocabulary()
+    }
+
+    func eraseVocabulary() {
+        lexicon.clear()
+        rebuildVocabulary()
     }
 
     func refreshLoginStatus() {
@@ -105,6 +168,11 @@ final class SettingsModel: ObservableObject {
 
     func setAggressiveness(_ level: Aggressiveness) {
         store.setAggressiveness(level)
+        accept(store.settings)
+    }
+
+    func setConfidentScore(_ score: Double?) {
+        store.setConfidentScore(score)
         accept(store.settings)
     }
 
@@ -168,8 +236,8 @@ final class SettingsWindowController {
     let model: SettingsModel
     private var window: NSWindow?
 
-    init(settings: SettingsStore) {
-        model = SettingsModel(store: settings)
+    init(settings: SettingsStore, lexicon: UserLexicon) {
+        model = SettingsModel(store: settings, lexicon: lexicon)
     }
 
     var isVisible: Bool { window?.isVisible == true }
@@ -210,11 +278,18 @@ final class SettingsWindowController {
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false)
-        window.title = "Dodoma Settings"
+        window.title = "Harf Settings"
         window.isReleasedWhenClosed = false
+        // The starfield runs edge to edge, so the title bar has to stop being
+        // an opaque strip across the top of it.
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.isMovableByWindowBackground = true
+        window.backgroundColor = NSColor(red: 0.043, green: 0.055, blue: 0.075, alpha: 1)
+        window.appearance = NSAppearance(named: .darkAqua)
         window.contentView = NSHostingView(rootView: SettingsView(model: model))
         window.center()
-        window.setFrameAutosaveName("DodomaSettingsWindow")
+        window.setFrameAutosaveName("HarfSettingsWindow")
         return window
     }
 }
@@ -225,16 +300,54 @@ private struct SettingsView: View {
     @ObservedObject var model: SettingsModel
 
     var body: some View {
-        TabView {
-            GeneralTab(model: model)
-                .tabItem { Text("General") }
-            ApplicationsTab(model: model)
-                .tabItem { Text("Applications") }
-            AdvancedTab(model: model)
-                .tabItem { Text("Advanced") }
+        ZStack {
+            DodomaTheme.canvas
+            // White reads as starlight; the teal is saved for the accents so
+            // the two do not compete.
+            GravityStarsBackground(
+                starCount: 90, starSize: 2.2, starOpacity: 0.85,
+                starColor: Color(red: 0.87, green: 0.95, blue: 0.98))
+
+            VStack(spacing: 0) {
+                header
+                TabView {
+                    GeneralTab(model: model)
+                        .tabItem { Text("General") }
+                    ApplicationsTab(model: model)
+                        .tabItem { Text("Applications") }
+                    VocabularyTab(model: model)
+                        .tabItem { Text("Vocabulary") }
+                    AdvancedTab(model: model)
+                        .tabItem { Text("Advanced") }
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 16)
+            }
         }
-        .padding(16)
-        .frame(width: 560, height: 480)
+        .frame(width: 560, height: 520)
+        .preferredColorScheme(.dark)
+    }
+
+    /// The window has no title bar text of its own now, so the wordmark and the
+    /// live status line carry the identity instead.
+    private var header: some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(DodomaTheme.accent)
+                .frame(width: 7, height: 7)
+                .shadow(color: DodomaTheme.accent.opacity(0.8), radius: 5)
+            Text("HARF")
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .kerning(2.4)
+                .foregroundStyle(DodomaTheme.accent)
+            Spacer()
+            Text("ع  ⇄  EN")
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.35))
+        }
+        .padding(.horizontal, 22)
+        .padding(.top, 14)
+        .padding(.bottom, 16)
     }
 }
 
@@ -259,7 +372,27 @@ private struct GeneralTab: View {
             Divider()
 
             Section {
-                Toggle("Pause Dodoma", isOn: paused)
+                Toggle("Fix short text when the score is high", isOn: confidenceEnabled)
+                if let score = model.settings.confidentScore {
+                    HStack(spacing: 12) {
+                        Slider(value: confidenceScore, in: 0.60...0.99, step: 0.01)
+                        Text(SettingsCopy.percent(score))
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundStyle(DodomaTheme.accent)
+                            .frame(width: 46, alignment: .trailing)
+                            .monospacedDigit()
+                    }
+                }
+                Text(SettingsCopy.confidenceExplanation(model.settings.confidentScore))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Divider()
+
+            Section {
+                Toggle("Pause Harf", isOn: paused)
                 Text("Nothing is buffered, evaluated or rewritten while this is on. "
                     + "The same switch as ⌘⌥P and the menu item.")
                     .font(.caption)
@@ -270,7 +403,7 @@ private struct GeneralTab: View {
             Divider()
 
             Section {
-                Toggle("Start Dodoma at login", isOn: loginItem)
+                Toggle("Start Harf at login", isOn: loginItem)
                     .disabled(model.loginStatus == .unavailable)
                 if !model.loginStatus.explanation.isEmpty {
                     Text(model.loginStatus.explanation)
@@ -295,6 +428,21 @@ private struct GeneralTab: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    /// Turning the rule off restores the length rules; turning it on returns
+    /// to a deliberately cautious score rather than wherever the slider last
+    /// sat, so an accidental toggle cannot leave it wide open.
+    private var confidenceEnabled: Binding<Bool> {
+        Binding(
+            get: { model.settings.confidentScore != nil },
+            set: { model.setConfidentScore($0 ? (model.settings.confidentScore ?? 0.90) : nil) })
+    }
+
+    private var confidenceScore: Binding<Double> {
+        Binding(
+            get: { model.settings.confidentScore ?? 0.90 },
+            set: { model.setConfidentScore($0) })
     }
 
     private var aggressiveness: Binding<Aggressiveness> {
@@ -358,7 +506,7 @@ private struct ApplicationsTab: View {
             HStack {
                 Button("+ Add app…") { addApp() }
                 Spacer()
-                Text("Removing a row does not switch Dodoma off for that app — it reverts it "
+                Text("Removing a row does not switch Harf off for that app — it reverts it "
                     + "to the default above.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -374,6 +522,107 @@ private struct ApplicationsTab: View {
     }
 }
 
+private struct VocabularyTab: View {
+    @ObservedObject var model: SettingsModel
+    @State private var newWord: String = ""
+    @State private var confirmingErase = false
+
+    private var known: Int { model.vocabRows.filter(\.promoted).count }
+    private var waiting: Int { model.vocabRows.count - known }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Picker("", selection: $model.vocabLanguage) {
+                Text("English").tag(Language.english)
+                Text("العربية").tag(Language.arabic)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            Text("The bundled word lists come from subtitles, so the words you use at work "
+                + "score as nonsense. Harf counts the words it sees you type and keeps "
+                + "them at \(UserLexicon.promotionThreshold) sightings, which stops your own "
+                + "vocabulary from dragging a reading down. It counts typos too — it can "
+                + "only tell wrong layout from right, not right spelling from wrong — so "
+                + "this is the list to prune.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if !model.settings.learnVocabulary {
+                Label("Learning is off. Nothing new is counted; words added by hand still "
+                    + "count.", systemImage: "pause.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("\(known) known · \(waiting) on the way")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            List {
+                ForEach(model.vocabRows) { row in
+                    HStack(spacing: 8) {
+                        // Monospaced suits Latin tokens, which are often
+                        // command names, and ruins Arabic: fixed advance widths
+                        // stretch the joins between letters until a word reads
+                        // as separated characters.
+                        Text(row.word)
+                            .font(.system(
+                                size: 13,
+                                design: model.vocabLanguage == .arabic ? .default : .monospaced))
+                        Spacer()
+                        Text(label(for: row))
+                            .font(.caption2)
+                            .foregroundStyle(row.promoted ? .primary : .secondary)
+                        Button {
+                            model.removeWord(row.word)
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Forget this word.")
+                    }
+                }
+            }
+            .frame(maxHeight: .infinity)
+
+            HStack(spacing: 8) {
+                TextField("Add a word Harf should always accept", text: $newWord)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { commit() }
+                Button("Add") { commit() }
+                    .disabled(newWord.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("Erase all…") { confirmingErase = true }
+            }
+            .confirmationDialog(
+                "Erase every learned word?",
+                isPresented: $confirmingErase,
+                titleVisibility: .visible
+            ) {
+                Button("Erase", role: .destructive) { model.eraseVocabulary() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Both languages, including words added by hand. Harf starts counting "
+                    + "again from nothing.")
+            }
+        }
+    }
+
+    private func commit() {
+        model.addWord(newWord)
+        newWord = ""
+    }
+
+    /// Manual entries have no count to show, and saying "0/10" next to a word
+    /// that is already accepted would read as the opposite of the truth.
+    private func label(for row: VocabularyRow) -> String {
+        if row.manual { return "added by hand" }
+        if row.promoted { return "known · seen \(row.count)×" }
+        return "\(row.count)/\(UserLexicon.promotionThreshold)"
+    }
+}
+
 private struct AdvancedTab: View {
     @ObservedObject var model: SettingsModel
 
@@ -381,7 +630,7 @@ private struct AdvancedTab: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Skip accessibility verification")
                 .font(.headline)
-            Text("Before deleting anything, Dodoma reads the text in front of the caret and "
+            Text("Before deleting anything, Harf reads the text in front of the caret and "
                 + "checks that it is exactly what it recorded you typing. Apps listed here "
                 + "skip that read: the rewrite goes ahead unverified, so a stale buffer "
                 + "deletes whatever happens to be in front of the caret instead. The list "
@@ -425,11 +674,13 @@ private struct AdvancedTab: View {
                 }
                 GridRow {
                     Text("Shortcuts").foregroundStyle(.secondary)
-                    Text("\(SettingsCopy.undoChord) / \(SettingsCopy.pauseChord)")
+                    Text(
+                        "\(SettingsCopy.undoChord) / \(SettingsCopy.pauseChord) "
+                            + "/ \(SettingsCopy.flipChord)")
                 }
                 GridRow {
                     Text("").foregroundStyle(.secondary)
-                    Text("undo / pause — rebinding not yet supported")
+                    Text("undo / pause / flip — rebinding not yet supported")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -502,7 +753,7 @@ private enum AppChooser {
             let alert = NSAlert()
             alert.messageText = "That application has no bundle identifier."
             alert.informativeText =
-                "Dodoma keys its settings on the bundle identifier, so \(url.lastPathComponent) "
+                "Harf keys its settings on the bundle identifier, so \(url.lastPathComponent) "
                 + "cannot be added."
             alert.alertStyle = .warning
             alert.runModal()
@@ -514,6 +765,22 @@ private enum AppChooser {
 
 /// Every user-facing string in the settings window, in one place.
 enum SettingsCopy {
+    static func percent(_ score: Double) -> String { "\(Int((score * 100).rounded()))%" }
+
+    /// What the confidence rule is for, in the terms the user meets it in: a
+    /// single word that was plainly wrong and was not corrected.
+    static func confidenceExplanation(_ score: Double?) -> String {
+        guard let score else {
+            return "Off. A single word is never rewritten silently, however certain the "
+                + "reading is; it is offered as a suggestion instead. Turn this on if short "
+                + "words are the ones you keep fixing by hand."
+        }
+        return "A run scoring at least \(percent(score)) in the other layout is "
+            + "rewritten even when it is one short word. Below that, the usual length rules "
+            + "apply. Text under three letters is never rewritten, and a URL, a path or an "
+            + "identifier is left alone at any setting."
+    }
+
     static func title(_ level: Aggressiveness) -> String {
         switch level {
         case .conservative: return "Conservative"
@@ -559,4 +826,5 @@ enum SettingsCopy {
     /// compare against the menu, so they match the menu.
     static let undoChord = "⌥⌘Z"
     static let pauseChord = "⌥⌘P"
+    static let flipChord = "⌃⌘F"
 }
