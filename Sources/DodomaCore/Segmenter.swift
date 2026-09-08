@@ -236,14 +236,15 @@ public enum Segmenter {
         // region must reach the caret. See `CandidateRegion.keys`.
         let regionKeys = Array(keys[start...])
         let typedText = onScreenText(of: regionKeys, layout: currentLayout)
+        let votes = tally(of: scored[firstAccepted...])
 
         return CandidateRegion(
             keys: regionKeys,
             typedText: typedText,
             letterCount: typedText.filter(\.isLetter).count,
             completedTokenCount: tokens[firstAccepted...].filter(\.isCompleted).count,
-            alternateVotes: tally(of: scored[firstAccepted...]).alternate,
-            currentVotes: tally(of: scored[firstAccepted...]).current)
+            alternateVotes: votes.alternate,
+            currentVotes: votes.current)
     }
 
     /// One token, read both ways.

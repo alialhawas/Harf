@@ -204,7 +204,7 @@ final class DecisionGateTests: XCTestCase {
     /// a rule about how little four letters usually prove.
     func testAConfidentScoreCarriesTextTooShortForTheLengthRules() {
         XCTAssertEqual(
-            verdict(alt: score(0.95), cur: score(0.10), letters: 4, completed: 0, tokens: 1,
+            verdict(alt: score(0.95), cur: score(0.10), letters: 4, completed: 1, tokens: 1,
                     guards: GuardResult(vetoes: [.shortSingleToken]),
                     thresholds: .balanced.withConfidentScore(0.90)),
             "autoApply")
@@ -214,8 +214,19 @@ final class DecisionGateTests: XCTestCase {
     /// same input is only ever offered.
     func testWithoutAConfidentScoreShortTextIsOnlySuggested() {
         XCTAssertEqual(
-            verdict(alt: score(0.95), cur: score(0.10), letters: 4, completed: 0, tokens: 1,
+            verdict(alt: score(0.95), cur: score(0.10), letters: 4, completed: 1, tokens: 1,
                     guards: GuardResult(vetoes: [.shortSingleToken])),
+            "suggest")
+    }
+
+    /// A word still being typed is not a short word, and a certainty about a
+    /// fragment is a certainty about the wrong word. Confidence waives the
+    /// length rules, never the finished-token rule.
+    func testAConfidentScoreDoesNotRewriteAWordStillBeingTyped() {
+        XCTAssertEqual(
+            verdict(alt: score(0.95), cur: score(0.10), letters: 5, completed: 0, tokens: 1,
+                    guards: GuardResult(vetoes: [.shortSingleToken]),
+                    thresholds: .balanced.withConfidentScore(0.90)),
             "suggest")
     }
 
@@ -224,7 +235,7 @@ final class DecisionGateTests: XCTestCase {
     func testAConfidentScoreDoesNotWaiveTheOtherGuards() {
         for veto in [GuardReason.urlOrPath, .identifierCase, .digitsAdjacent, .recentlyUndone] {
             XCTAssertEqual(
-                verdict(alt: score(0.99), cur: score(0.02), letters: 4, completed: 0, tokens: 1,
+                verdict(alt: score(0.99), cur: score(0.02), letters: 4, completed: 1, tokens: 1,
                         guards: GuardResult(vetoes: [.shortSingleToken, veto]),
                         thresholds: .balanced.withConfidentScore(0.90)),
                 "ignore", "\(veto.rawValue) must still block")
@@ -234,7 +245,7 @@ final class DecisionGateTests: XCTestCase {
     /// Two letters is not evidence at any score.
     func testAConfidentScoreStillRefusesTwoLetters() {
         XCTAssertEqual(
-            verdict(alt: score(0.99), cur: score(0.02), letters: 2, completed: 0, tokens: 1,
+            verdict(alt: score(0.99), cur: score(0.02), letters: 2, completed: 1, tokens: 1,
                     guards: GuardResult(vetoes: [.shortSingleToken]),
                     thresholds: .balanced.withConfidentScore(0.90)),
             "ignore")
@@ -244,7 +255,7 @@ final class DecisionGateTests: XCTestCase {
     /// a word merely plausible in both languages must not be rewritten.
     func testAConfidentScoreStillNeedsASeparation() {
         XCTAssertEqual(
-            verdict(alt: score(0.95), cur: score(0.60), letters: 4, completed: 0, tokens: 1,
+            verdict(alt: score(0.95), cur: score(0.60), letters: 4, completed: 1, tokens: 1,
                     guards: GuardResult(vetoes: [.shortSingleToken]),
                     thresholds: .balanced.withConfidentScore(0.90)),
             "suggest",
@@ -252,4 +263,26 @@ final class DecisionGateTests: XCTestCase {
                 + "refuses and the ordinary suggestion path takes it instead")
     }
 
+    // MARK: - The shortcuts move with the preset
+
+    /// cur 0.36 is over every preset's `autoCur`, so the ordinary ladder is out
+    /// and only the decisive shortcut can auto-apply. Eager's 0.72/0.44 takes
+    /// it; Conservative's 0.86/0.58 does not, which is the whole point of
+    /// choosing Conservative.
+    func testTheDecisiveShortcutObeysThePreset() {
+        XCTAssertEqual(
+            verdict(alt: score(0.82), cur: score(0.36), thresholds: .eager), "autoApply")
+        XCTAssertEqual(
+            verdict(alt: score(0.82), cur: score(0.36), thresholds: .conservative), "suggest")
+    }
+
+    /// The same for the dictionary shortcut: alt.combined is 0.53, under every
+    /// preset's `autoAlt`, so an autoApply here can only be the override.
+    func testTheDictionaryShortcutObeysThePreset() {
+        let alt = Score(bigram: 0.30, dictCoverage: 0.81)
+        let cur = Score(bigram: 0.00, dictCoverage: 0.14)
+        XCTAssertLessThan(alt.combined, Thresholds.eager.autoAlt)
+        XCTAssertEqual(verdict(alt: alt, cur: cur, thresholds: .eager), "autoApply")
+        XCTAssertEqual(verdict(alt: alt, cur: cur, thresholds: .conservative), "suggest")
+    }
 }

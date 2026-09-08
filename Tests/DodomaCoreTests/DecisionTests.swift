@@ -16,21 +16,57 @@ final class DecisionTests: XCTestCase {
         XCTAssertEqual(Thresholds.balanced.autoGap, 0.40)
         XCTAssertEqual(Thresholds.balanced.suggestGap, 0.18)
         XCTAssertEqual(Thresholds.balanced.suggestAlt, 0.45)
+        XCTAssertEqual(Thresholds.balanced.decisiveAlt, 0.78)
+        XCTAssertEqual(Thresholds.balanced.decisiveGap, 0.50)
+        XCTAssertEqual(Thresholds.balanced.dictOverrideAlt, 0.80)
+        XCTAssertEqual(Thresholds.balanced.dictOverrideCur, 0.15)
 
         XCTAssertEqual(Thresholds.conservative.autoAlt, 0.70)
         XCTAssertEqual(Thresholds.conservative.autoCur, 0.20)
         XCTAssertEqual(Thresholds.conservative.autoGap, 0.48)
         XCTAssertEqual(Thresholds.conservative.suggestGap, 0.26)
+        XCTAssertEqual(Thresholds.conservative.decisiveAlt, 0.86)
+        XCTAssertEqual(Thresholds.conservative.decisiveGap, 0.58)
+        XCTAssertEqual(Thresholds.conservative.dictOverrideAlt, 0.88)
+        XCTAssertEqual(Thresholds.conservative.dictOverrideCur, 0.07)
 
         XCTAssertEqual(Thresholds.eager.autoAlt, 0.56)
         XCTAssertEqual(Thresholds.eager.autoCur, 0.34)
         XCTAssertEqual(Thresholds.eager.autoGap, 0.34)
         XCTAssertEqual(Thresholds.eager.suggestGap, 0.12)
+        XCTAssertEqual(Thresholds.eager.decisiveAlt, 0.72)
+        XCTAssertEqual(Thresholds.eager.decisiveGap, 0.44)
+        XCTAssertEqual(Thresholds.eager.dictOverrideAlt, 0.74)
+        XCTAssertEqual(Thresholds.eager.dictOverrideCur, 0.21)
 
-        XCTAssertEqual(Thresholds.dictOverrideAlt, 0.80)
-        XCTAssertEqual(Thresholds.dictOverrideCur, 0.15)
         XCTAssertEqual(Thresholds.autoMinLetters, 6)
         XCTAssertEqual(Thresholds.suggestMinLetters, 4)
+        XCTAssertEqual(Thresholds.dictOverrideTokens, 2)
+    }
+
+    /// Every automatic gate moves with the preset, by the same ±0.08 / −0.06
+    /// of strictness. A gate left behind is a gate that decides at Balanced's
+    /// numbers however the user set the slider.
+    func testEveryAutomaticGateMovesWithThePreset() {
+        let stricter: [(String, KeyPath<Thresholds, Double>)] = [
+            ("autoAlt", \.autoAlt), ("autoGap", \.autoGap), ("suggestGap", \.suggestGap),
+            ("decisiveAlt", \.decisiveAlt), ("decisiveGap", \.decisiveGap),
+            ("dictOverrideAlt", \.dictOverrideAlt),
+        ]
+        for (name, gate) in stricter {
+            XCTAssertGreaterThan(
+                Thresholds.conservative[keyPath: gate], Thresholds.balanced[keyPath: gate], name)
+            XCTAssertLessThan(
+                Thresholds.eager[keyPath: gate], Thresholds.balanced[keyPath: gate], name)
+        }
+        // Ceilings: stricter means a lower number.
+        for (name, gate) in [("autoCur", \Thresholds.autoCur),
+                             ("dictOverrideCur", \Thresholds.dictOverrideCur)] {
+            XCTAssertLessThan(
+                Thresholds.conservative[keyPath: gate], Thresholds.balanced[keyPath: gate], name)
+            XCTAssertGreaterThan(
+                Thresholds.eager[keyPath: gate], Thresholds.balanced[keyPath: gate], name)
+        }
     }
 
     // MARK: - The canonical fix
