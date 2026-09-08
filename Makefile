@@ -93,10 +93,10 @@ test:
 # Snapshots this machine's ABC and Arabic uchr tables so renderer tests stay
 # deterministic regardless of which input sources are enabled where they run.
 fixtures:
-	swift run Dodoma --dump-layout-fixtures $(FIXTURES)
+	swift run Harf --dump-layout-fixtures $(FIXTURES)
 
 eval:
-	swift run Dodoma --eval $(CORPUS)
+	swift run Harf --eval $(CORPUS)
 
 # --debug --info: the decision and pipeline categories log at those levels, and
 # `log stream` shows neither by default.

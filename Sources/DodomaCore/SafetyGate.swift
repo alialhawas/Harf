@@ -153,4 +153,22 @@ public enum SafetyGate {
             }
         }
     }
+
+    /// Whether a command the user issued by name may touch the focused field
+    /// at all, given only what that field turned out to be.
+    ///
+    /// `resolve` asks the same question one step too late for the manual
+    /// flip. That command reads the selection *before* it has a fix to resolve
+    /// — by posting ⌘C when accessibility is silent — and reading a password
+    /// field's selection onto the pasteboard is itself the leak. So the
+    /// secure-field rule has to be applied before anything is asked of the
+    /// application, not only before anything is deleted from it.
+    ///
+    /// `.unknown` allows, for the reason given at the top of this file: the
+    /// secure-field check fails open, because secure event input is the belt
+    /// that catches what accessibility cannot see, and it is checked
+    /// separately and synchronously by every explicit path.
+    public static func allowsExplicitCommand(secureField: SecureFieldState) -> Bool {
+        secureField != .secure
+    }
 }

@@ -178,6 +178,25 @@ final class SafetyGateTests: XCTestCase {
 
     /// A region that auto-applies under `.normal` must come out as a suggestion
     /// under `.suggestOnly` — the terminal seeds depend on it.
+    // MARK: - Explicit commands
+
+    /// The manual flip reads the selection before it has a fix to resolve, so
+    /// the secure-field rule has to hold one step earlier than `resolve`.
+    func testASecureFieldRefusesAnExplicitCommand() {
+        XCTAssertFalse(SafetyGate.allowsExplicitCommand(secureField: .secure))
+    }
+
+    func testAnOrdinaryFieldAllowsAnExplicitCommand() {
+        XCTAssertTrue(SafetyGate.allowsExplicitCommand(secureField: .notSecure))
+    }
+
+    /// Pinned on purpose: the secure-field check fails open, matching
+    /// `resolve`, because secure event input is the separate belt that
+    /// covers what accessibility cannot see.
+    func testAnUnknownSecurityVerdictAllowsAnExplicitCommand() {
+        XCTAssertTrue(SafetyGate.allowsExplicitCommand(secureField: .unknown))
+    }
+
     func testSuggestOnlyCapsAnAutoApplyAtSuggest() {
         let typedText = "aaaaa aaaaa"
         let region = CandidateRegion(
