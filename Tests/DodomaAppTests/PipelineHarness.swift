@@ -281,6 +281,9 @@ final class PipelineHarness {
     private var undoCount = 0
     private var hides = 0
     private var switches: [String] = []
+    private var flipped: [Flip] = []
+    /// Fulfilled by the next flip that lands. See `awaitFlipCard`.
+    private var flipWaiter: XCTestExpectation?
 
     /// - Parameter axVerifySkip: seeded into the settings blob before the store
     ///   reads it, because there is no setter for it — it is a hand-edited
@@ -303,11 +306,19 @@ final class PipelineHarness {
             fixEngine: engine,
             focus: oracle)
 
+        // The layouts a flip renders through. The real cache is populated from
+        // the input sources enabled on whichever machine runs the suite, so
+        // without this every flip test would depend on the tester having
+        // Arabic installed.
+        pipeline.layoutPair = { HarnessLayouts.pair }
+
         pipeline.onSuggest = { [weak self] offer in self?.append(offer: offer.fix) }
         pipeline.onAutoApply = { [weak self] applied in self?.append(applied: applied) }
         pipeline.onRequestRejected = { [weak self] in self?.bumpRejections() }
         pipeline.onUndoApplied = { [weak self] in self?.bumpUndos() }
         pipeline.onHideSuggestion = { [weak self] in self?.bumpHides() }
+        // Main thread, like the card controller that normally receives it.
+        pipeline.onFlipApplied = { [weak self] flip, _ in self?.append(flip: flip) }
 
         // Every applied fix ends by switching the keyboard layout, and the app
         // hears that back. On by default, because a fix that does not announce
@@ -381,9 +392,18 @@ final class PipelineHarness {
         drain()
     }
 
+    /// - Parameter rounds: more than the default, because the flip is the
+    ///   longest chain in the pipeline: security check, selection read, the
+    ///   copy that may follow it, resolve, apply, the read-back, finish, and
+    ///   the layout announcement each of those hops behind the last.
+    func flip(rounds: Int = 10) {
+        pipeline.flipSelection()
+        drain(rounds)
+    }
+
     /// Lets everything already queued run, and everything those blocks queue in
-    /// turn. Six rounds is comfortably more than the deepest chain — gate,
-    /// resolve, apply, finish.
+    /// turn. Six rounds covers the ordinary chain — gate, resolve, apply,
+    /// finish; the flip is longer, which is what `flip(rounds:)` is for.
     func drain(_ rounds: Int = 6) {
         for _ in 0..<rounds { pipeline.queue.sync {} }
     }
@@ -431,6 +451,36 @@ final class PipelineHarness {
         return hides
     }
 
+    /// The flips published to the card, in order.
+    var flips: [Flip] {
+        lock.lock()
+        defer { lock.unlock() }
+        return flipped
+    }
+
+    /// The first flip published to the card, waiting for it if it has not
+    /// arrived yet.
+    ///
+    /// `onFlipApplied` lands on the main thread, which is the thread the test
+    /// itself is running on: draining the pipeline queue proves nothing about
+    /// it, and reading `flips` straight after a flip would always find it
+    /// empty. Waiting on an expectation is what lets the main queue run.
+    func awaitFlipCard(_ test: XCTestCase, timeout: TimeInterval = 1) -> Flip? {
+        lock.lock()
+        if let first = flipped.first {
+            lock.unlock()
+            return first
+        }
+        let waiting = test.expectation(description: "a flip was published to the card")
+        // Registered under the same lock the callback takes, so a flip landing
+        // between the check above and here cannot go unnoticed.
+        flipWaiter = waiting
+        lock.unlock()
+
+        test.wait(for: [waiting], timeout: timeout)
+        return flips.first
+    }
+
     /// The layout switches the applies announced, in order.
     var layoutSwitches: [String] {
         lock.lock()
@@ -460,6 +510,15 @@ final class PipelineHarness {
         lock.unlock()
     }
 
+    private func append(flip: Flip) {
+        lock.lock()
+        flipped.append(flip)
+        let waiting = flipWaiter
+        flipWaiter = nil
+        lock.unlock()
+        waiting?.fulfill()
+    }
+
     private func bumpRejections() {
         lock.lock()
         rejections += 1
@@ -477,6 +536,35 @@ final class PipelineHarness {
         hides += 1
         lock.unlock()
     }
+}
+
+// MARK: - Layouts
+
+/// The committed `uchr` snapshot, as the flip paths need it.
+///
+/// `DodomaCoreTests` loads the same file through `LayoutFixtures`, but one test
+/// target cannot import another and the JSON is a resource of that target's
+/// bundle, so it is read off the source tree here. `#filePath` is what makes
+/// that work under both `swift test` and Xcode, whose working directories
+/// differ.
+enum HarnessLayouts {
+    static let url =
+        URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()  // Tests/DodomaAppTests
+        .deletingLastPathComponent()  // Tests
+        .appendingPathComponent("DodomaCoreTests/Fixtures/layout-tables.json")
+
+    /// Nil when the snapshot is missing or malformed. Tests that need it say
+    /// so once, rather than failing with a decoding error each.
+    static let pair: (english: KeyboardLayout, arabic: KeyboardLayout)? = {
+        guard
+            let data = try? Data(contentsOf: url),
+            let fixtures = try? JSONDecoder().decode([LayoutFixture].self, from: data),
+            let english = fixtures.first(where: { $0.sourceID == Fixtures.english })?.makeLayout(),
+            let arabic = fixtures.first(where: { $0.sourceID == Fixtures.arabic })?.makeLayout()
+        else { return nil }
+        return (english, arabic)
+    }()
 }
 
 // MARK: - Fixtures
