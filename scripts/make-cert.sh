@@ -46,7 +46,7 @@ if [ -n "$EXISTING" ]; then
 fi
 
 if security find-certificate -c "$IDENTITY" "$KEYCHAIN" >/dev/null 2>&1; then
-    if security find-identity -v -p codesigning | grep -q "$IDENTITY"; then
+    if security find-identity -v -p codesigning | grep -qF -- "$IDENTITY"; then
         echo "Code-signing identity '$IDENTITY' already exists and is valid. Nothing to do."
         exit 0
     fi
@@ -117,12 +117,22 @@ export_p12() {
         -out "$P12" \
         -name "$IDENTITY" \
         -passout env:P12_PASS
+    # The archive holds the private key. WORKDIR is already 0700 from mktemp;
+    # this narrows the file itself so the key is never group- or world-readable
+    # for the few seconds it exists.
+    chmod 600 "$P12"
 }
 
 echo "==> Bundling key and certificate into a PKCS#12 archive"
 export_p12
 
 echo "==> Importing into the login keychain"
+# -P puts the archive passphrase in the argument list, where anyone on the
+# machine can read it out of `ps` while the command runs. Accepted here, and
+# only here: this passphrase is a random value generated seconds ago, guards a
+# 0600 file inside a 0700 temporary directory, and is unset and thrown away
+# immediately below. `security import` has no way to read it from a file
+# descriptor, and prompting is not an option because nobody knows it.
 if ! security import "$P12" -k "$KEYCHAIN" -P "$P12_PASS" -T /usr/bin/codesign; then
     if openssl pkcs12 -help 2>&1 | grep -q -- "-legacy"; then
         # Expected on OpenSSL 3.x, whose default AES-256-CBC/PBKDF2 archives
@@ -147,26 +157,28 @@ echo "==> Authorising /usr/bin/codesign to use the new private key"
 echo "    macOS needs the login keychain password to update the key's"
 echo "    partition list. Without this step every 'make sign' raises a GUI"
 echo "    prompt asking you to allow keychain access."
-printf "    Login keychain password: "
-read -r -s KEYCHAIN_PASSWORD
+echo "    Enter it at the prompt macOS raises."
 echo
 
+# -k is deliberately absent: passing the login keychain password as an argument
+# puts it in this process's argument list, where every other process on the
+# machine can read it out of `ps` for as long as the command runs. Without -k,
+# `security` asks for it itself and it never becomes an argument.
+#
 # -l scopes the update to this key only. Without it, -s would rewrite the
 # partition list of every signing key in the login keychain.
 security set-key-partition-list \
     -S apple-tool:,apple:,codesign: \
     -s \
     -l "$IDENTITY" \
-    -k "$KEYCHAIN_PASSWORD" \
     "$KEYCHAIN" >/dev/null
-unset KEYCHAIN_PASSWORD
 
 echo "==> Marking the certificate as trusted for code signing"
 echo "    macOS may raise a GUI authorisation prompt here."
 security add-trusted-cert -r trustRoot -p codeSign -k "$KEYCHAIN" "$CERT_PEM"
 
 echo
-if security find-identity -v -p codesigning | grep -q "$IDENTITY"; then
+if security find-identity -v -p codesigning | grep -qF -- "$IDENTITY"; then
     echo "SUCCESS: code-signing identity '$IDENTITY' is available."
     echo "Run 'make install' to build, bundle and sign Dodoma."
     exit 0

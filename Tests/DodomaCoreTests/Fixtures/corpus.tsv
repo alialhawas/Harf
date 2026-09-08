@@ -1,7 +1,11 @@
-# Dodoma detection corpus.  One row per line: TEXT<TAB>EXPECTED.
+# Harf detection corpus.  One row per line: TEXT<TAB>EXPECTED.
 # EXPECTED is one of auto_ar auto_en suggest ignore.  Lines starting with #
 # and blank lines are skipped.  Run with:
-#     swift run Dodoma --eval Tests/DodomaCoreTests/Fixtures/corpus.tsv
+#     make eval        (or: swift run Harf --eval Tests/DodomaCoreTests/Fixtures/corpus.tsv)
+#
+# MAINTAINED BY HAND.  This file is the source of truth; there is no tracked
+# generator, and no build step rewrites it.  To add a row, transliterate the
+# phrase with the key map below and append it under the matching section.
 #
 # Every row is the text AS TYPED.  The harness picks the layout the text was
 # typed under from its script (Latin -> ABC, Arabic -> Arabic) and asks the

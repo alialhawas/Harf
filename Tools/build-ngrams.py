@@ -5,10 +5,13 @@
 # ///
 """Generate Dodoma's offline language models from open word-frequency data.
 
-This is the ONLY part of the project that touches the network, and it only
+This is the ONLY part of the app's build that touches the network, and it only
 does so on a developer machine when the raw lists are not already cached in
-``Tools/data/`` (gitignored). The Swift app and its tests read exclusively
-from the committed outputs under ``Sources/DodomaCore/Resources/``.
+``Tools/data/`` (gitignored). Both downloads are pinned to a commit and their
+sha256 asserted, so a fresh clone rebuilds byte-identical models. The
+hand-curated Gulf Arabic supplement they are merged with is tracked, at
+``Tools/dialect/ar.txt``. The Swift app and its tests read exclusively from the
+committed outputs under ``Sources/DodomaCore/Resources/``.
 
 Outputs, all deterministic (rerunning over the same cache yields byte
 identical files):
@@ -25,6 +28,7 @@ Usage:  uv run Tools/build-ngrams.py  [--force]
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import re
@@ -36,13 +40,27 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 CACHE_DIR = REPO_ROOT / "Tools" / "data"
 OUTPUT_DIR = REPO_ROOT / "Sources" / "DodomaCore" / "Resources"
 
+# Pinned to a commit, not to `master`. This is the only network fetch whose
+# output ships to users, so the bytes have to be identical on every machine and
+# in every future run; a moving branch silently changes the shipped word lists.
+# To take a newer corpus, bump the SHA and both digests below together — the
+# digests are asserted on every download, so a mismatched pair fails loudly.
+FREQUENCY_WORDS_COMMIT = "525f9b560de45753a5ea01069454e72e9aa541c6"
 SOURCES = {
-    "en": "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/en/en_50k.txt",
-    "ar": "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/ar/ar_50k.txt",
+    "en": f"https://raw.githubusercontent.com/hermitdave/FrequencyWords/{FREQUENCY_WORDS_COMMIT}/content/2018/en/en_50k.txt",
+    "ar": f"https://raw.githubusercontent.com/hermitdave/FrequencyWords/{FREQUENCY_WORDS_COMMIT}/content/2018/ar/ar_50k.txt",
+}
+# sha256 of each file at FREQUENCY_WORDS_COMMIT. Measured against the caches
+# that produced the committed models, so the models stay reproducible.
+SOURCE_SHA256 = {
+    "en": "5351ff405b1126ef555791dd4d9798a48e3e9a501a9fc481a9da957752cfb458",
+    "ar": "bbe98b4b92902b392bdefa2e555a108fdb42a5dd79d261674be5ab666229e19f",
 }
 
 WORDLIST_LIMIT = 40_000
-DIALECT_FILE = REPO_ROOT / "Tools" / "data" / "ar.dialect.txt"
+# Tracked, unlike the fetched caches: it is hand-curated project data that the
+# shipped ar.words depends on, so a fresh clone has to regenerate the same model.
+DIALECT_FILE = REPO_ROOT / "Tools" / "dialect" / "ar.txt"
 SMOOTHING_K = 0.5
 # Two-letter entries beyond this rank are dropped; see prune_short_noise.
 SHORT_WORD_RANK_LIMIT = 5_000
@@ -84,16 +102,40 @@ AR_LETTERS = {chr(c) for c in range(0x0621, 0x063B)} | {
 
 
 def fetch(language: str, url: str, force: bool) -> Path:
+    """Download (or reuse) one word list, refusing bytes that do not match.
+
+    The digest is checked before anything is written to the cache and again on
+    a cache hit, so neither a compromised download nor a cache left over from
+    the old unpinned `master` URL can reach the shipped models.
+    """
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     path = CACHE_DIR / f"{language}_50k.txt"
+    expected = SOURCE_SHA256[language]
     if path.exists() and not force:
-        print(f"cache hit  {path.relative_to(REPO_ROOT)}")
-        return path
+        cached = hashlib.sha256(path.read_bytes()).hexdigest()
+        if cached == expected:
+            print(f"cache hit  {path.relative_to(REPO_ROOT)}")
+            return path
+        print(
+            f"warning: {path.relative_to(REPO_ROOT)} does not match the pinned "
+            f"digest (got {cached}); re-downloading",
+            file=sys.stderr,
+        )
     print(f"fetching   {url}")
     with urllib.request.urlopen(url, timeout=60) as response:
         payload = response.read()
+    digest = hashlib.sha256(payload).hexdigest()
+    if digest != expected:
+        raise SystemExit(
+            f"error: {url}\n"
+            f"       expected sha256 {expected}\n"
+            f"       got      sha256 {digest}\n"
+            "       Refusing to cache it. Either the pin is stale (bump "
+            "FREQUENCY_WORDS_COMMIT and SOURCE_SHA256 together) or the "
+            "download was tampered with."
+        )
     path.write_bytes(payload)
-    print(f"cached     {path.relative_to(REPO_ROOT)} ({len(payload)} bytes)")
+    print(f"cached     {path.relative_to(REPO_ROOT)} ({len(payload)} bytes, sha256 ok)")
     return path
 
 
@@ -132,9 +174,17 @@ def add_supplement(
 
     A word already present keeps its measured count: the supplement is there to
     add what the corpus lacks, not to re-weight what it has.
+
+    A configured supplement that is missing is an error, not a no-op: silently
+    skipping it produces a model that scores Gulf Arabic several points lower
+    than the committed one, with nothing in the output to say why.
     """
     if not path.exists():
-        return counts
+        raise SystemExit(
+            f"error: supplement {path.relative_to(REPO_ROOT)} is missing.\n"
+            "       It is tracked in the repository; restore it (git checkout) "
+            "rather than building without it — the shipped ar.words depends on it."
+        )
     ranked = sorted(counts.values())
     median = ranked[len(ranked) // 2] if ranked else 1
     added = 0
@@ -270,6 +320,11 @@ LICENSES = """# Bundled data licences
 
 `en.words`, `ar.words`, `en.bigrams.json` and `ar.bigrams.json` are derived
 works generated by `Tools/build-ngrams.py` from the FrequencyWords corpus.
+`ar.words` and `ar.bigrams.json` also incorporate the dialect supplement
+described below.
+
+This file is generated: it is written from the `LICENSES` constant in
+`Tools/build-ngrams.py`, so edit that constant rather than this file.
 
 ## FrequencyWords
 
@@ -300,6 +355,19 @@ SOFTWARE.
 
 The FrequencyWords lists are themselves derived from OpenSubtitles
 (http://opus.nlpl.eu/OpenSubtitles2018.php).
+
+## Gulf Arabic dialect supplement
+
+- Source: `Tools/dialect/ar.txt` in this repository
+- Origin: original to this project, curated by hand. Not derived from
+  FrequencyWords, OpenSubtitles or any other third-party corpus.
+- Licence: same terms as this repository.
+
+FrequencyWords is drawn from film subtitles and news, both of which lean
+Modern Standard Arabic, so the dialect people actually type is largely absent
+from it. The supplement is a short hand-written word list merged into the
+Arabic counts at their median frequency; it affects `ar.words` and
+`ar.bigrams.json` only.
 """
 
 
