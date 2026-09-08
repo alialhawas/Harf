@@ -298,6 +298,42 @@ It is positioned from the caret where the application reports one, and otherwise
 from the focused control, the focused window, the pointer or the screen, in that
 order. It works on a second display and shows over full-screen applications.
 
+### Flip it yourself — ⌃⌘F
+
+Some wrong-layout text is unreachable by any detector. `حق مرن` is what "pr lnk"
+becomes on the Arabic layout, and both of those are real Arabic words, so there is
+nothing to detect. For those, select the text and press **⌃⌘F**. The selection is
+replaced by the same keystrokes rendered under the other layout — Arabic becomes
+English, English becomes Arabic, decided by the script of what you selected rather
+than by whichever layout happens to be active — and the input source switches to
+match. Nothing is scored and nothing is deleted: typing over a selection replaces
+it, so the flip is a single insertion.
+
+- **With nothing selected**, the last run you typed is flipped instead, but only
+  where Harf can read the text in front of the caret and confirm it matches what
+  it recorded. In applications that expose no text — Ghostty, and web views such
+  as Conductor — it refuses with a ✕. Select first there.
+- **Where Accessibility is silent**, the selection is read by copying it: Harf
+  presses ⌘C on your behalf, reads the pasteboard, and puts your clipboard back
+  as it found it. Plain and rich text survive the round trip exactly; a copied
+  file or image does not, so flip text, not files. Clipboard managers are told
+  to ignore the write.
+- **⌘⌥Z undoes a flip** for thirty seconds, the same as any other fix.
+- **A card** then offers **Learn** / **Not**. Learn records the flipped words as
+  yours in the language they are now in — including short ones like `pr` that
+  counting can never reach — and stops counting the originals toward the other
+  language. Not, or six seconds of nothing, leaves the dictionary alone. The flip
+  stands either way.
+- It is refused, with a ✕, while paused, in an application set to **Off**, while
+  secure input is on, or in a password field — and in the last two cases before
+  anything is copied. Applications set to *Suggest only* still flip: you asked.
+
+Two costs to know about. ⌃⌘F is the default **Enter Full Screen** shortcut in Finder,
+Safari, TextEdit and a number of other applications, and a global hotkey takes
+precedence, so that toggle stops working while Harf runs. And a flip is slower than
+it looks: it waits for you to let go of the chord, asks the application twice, and
+may copy — expect a beat, not an instant.
+
 ### Undo — ⌘⌥Z
 
 For **30 seconds** after a fix, ⌘⌥Z puts your original text back and switches
@@ -324,6 +360,7 @@ follow. The event tap keeps running so that unpausing needs no permission dance.
 | *Status line* | `Active (capturing)`, `Paused`, `Paused — secure input`, `Needs … permission`, or `Active (capturing) — degraded, click suggestions to accept` |
 | *Last fix* | What was replaced, by what, where and when |
 | **Undo Last Fix** ⌘⌥Z | Enabled only while there is something to undo |
+| **Flip Selection** ⌃⌘F | Flip the selection, or the last run typed, to the other layout |
 | **Pause Harf** | Same switch as ⌘⌥P |
 | **Mode for &lt;app&gt;** | Normal / Suggest only / Off, for the application you were typing in |
 | **Settings…** ⌘, | The window below |
