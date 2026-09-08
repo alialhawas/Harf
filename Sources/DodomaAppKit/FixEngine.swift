@@ -1,3 +1,4 @@
+import AppKit
 import Carbon.HIToolbox
 import CoreGraphics
 import DodomaCore
@@ -59,13 +60,42 @@ struct FixFailure: Error {
     let progress: FixProgress
 }
 
-/// The one thing the typing pipeline asks of the injector.
+/// What asking the frontmost application for its selection produced.
+///
+/// Three cases, deliberately: "there was nothing selected" and "the question
+/// could not be asked" must never collapse into one nil, or a held modifier
+/// turns "flip my selection" into "flip whatever was typed last" — a rewrite of
+/// a completely different span of the document.
+enum CopyResult: Equatable {
+    /// The application answered, and this is what it had selected.
+    case copied(String)
+    /// The application answered and there was nothing selected, or what it put
+    /// on the pasteboard was not text a flip can be about.
+    case noSelection
+    /// The copy was never attempted, or was attempted and cannot be trusted.
+    case couldNotTry(FixError)
+}
+
+/// The things the typing pipeline asks of the injector.
 ///
 /// A protocol because the alternative, in a test, is posting real backspaces
 /// into whatever window happens to be frontmost on the machine running them.
 protocol FixApplying: AnyObject {
     func apply(
         _ fix: Fix,
+        in bundleID: String?,
+        isStale: @escaping () -> Bool,
+        completion: @escaping (Result<FixProgress, FixFailure>) -> Void)
+
+    /// Asks the frontmost application for its selection, by ⌘C, and puts the
+    /// user's clipboard back afterwards.
+    func copySelection(in bundleID: String?, completion: @escaping (CopyResult) -> Void)
+
+    /// Types `text` over the selection `copySelection` read, then switches the
+    /// layout. Nothing is deleted: see `replaceSelection` on the engine.
+    func replaceSelection(
+        with text: String,
+        targetLayoutID: String,
         in bundleID: String?,
         isStale: @escaping () -> Bool,
         completion: @escaping (Result<FixProgress, FixFailure>) -> Void)
@@ -109,7 +139,60 @@ final class FixEngine: FixApplying {
         static let layoutSwitchTimeout: TimeInterval = 0.250
         /// UTF-16 units per injected chunk.
         static let insertChunkLimit = 60
+        /// Between the down and the up of an injected chord.
+        ///
+        /// Longer than the plain-keystroke intervals on purpose: a ⌘C whose up
+        /// event arrives in the same run-loop turn as its down is dropped
+        /// outright by apps that debounce the modifier, and a dropped copy is
+        /// indistinguishable here from an empty selection.
+        static let chordInterval: TimeInterval = 0.008
+        /// How often the pasteboard's change count is re-read while waiting for
+        /// the application to answer the copy.
+        static let copyPollInterval: TimeInterval = 0.010
+        /// How long the copy is given before the selection is called empty.
+        /// Native views answer within a frame; Electron and Java ones take tens
+        /// of milliseconds, and this covers the slowest of them.
+        static let copyTimeout: TimeInterval = 0.300
+        /// One last pause and one last look after the timeout.
+        ///
+        /// An application that answered a poll interval late looks exactly like
+        /// an application with nothing selected, and calling that "nothing
+        /// selected" sends the flip to the typed buffer — a rewrite of text the
+        /// user was not pointing at.
+        static let copyGrace: TimeInterval = 0.100
+        /// How long after putting the clipboard back to check that it stayed
+        /// put. Electron apps write their copy asynchronously and can land
+        /// after ours, leaving the user's clipboard holding the flipped text.
+        static let copyRestoreRecheck: TimeInterval = 0.150
+        /// Modifier pre-flight retries for the selection flip: nine checks,
+        /// about 1.2 s.
+        ///
+        /// The hotkey that starts a selection flip is itself a chord, so the
+        /// user is physically holding ⌘ and friends at the moment the sequence
+        /// begins. The 450 ms budget the typed-buffer fix runs on refuses an
+        /// ordinary, unhurried key press.
+        static let flipModifierRetryLimit = 8
     }
+
+    /// The longest selection a flip will act on, in UTF-16 units.
+    ///
+    /// Past this it is not a mistyped word or sentence, it is a document, and
+    /// retyping a document one chunk at a time is neither fast nor reversible.
+    private static let selectionLimitUTF16 = 1000
+
+    /// Written alongside the restored clipboard so clipboard managers skip it.
+    ///
+    /// Without these, every flip pushes the user's own clipboard back onto the
+    /// top of their clipboard history as a fresh entry.
+    private static let transientMarkerTypes: [NSPasteboard.PasteboardType] = [
+        NSPasteboard.PasteboardType("org.nspasteboard.TransientType"),
+        NSPasteboard.PasteboardType("org.nspasteboard.AutoGeneratedType"),
+    ]
+
+    /// Flavours that mean the selection is not text a flip can be about.
+    private static let nonTextPasteboardTypes: Set<NSPasteboard.PasteboardType> = [
+        .fileURL, .URL, .tiff, .png,
+    ]
 
     /// Modifiers that mean the keystroke stream is not plain typing.
     ///
@@ -150,6 +233,41 @@ final class FixEngine: FixApplying {
     ) {
         queue.async {
             completion(self.perform(fix, in: bundleID, isStale: isStale))
+        }
+    }
+
+    /// Asks the frontmost application what it has selected, by pressing ⌘C for
+    /// the user and reading the pasteboard, and puts the pasteboard back.
+    ///
+    /// Runs entirely on the engine's own queue, like `apply`, and for the same
+    /// reason: it sleeps between events and polls the pasteboard for up to
+    /// 400 ms. The main-thread invariant `selectInputSource` documents survives
+    /// untouched — the only main-thread hops on this path are the `main.sync`
+    /// inside `currentBundleID()` and, on the replace side, `selectInputSource`
+    /// itself, and nothing on the main thread ever waits on this queue.
+    func copySelection(in bundleID: String?, completion: @escaping (CopyResult) -> Void) {
+        queue.async {
+            completion(self.performCopy(in: bundleID))
+        }
+    }
+
+    /// Types `text` over the application's current selection and switches the
+    /// layout, reporting the outcome on the engine's own queue.
+    ///
+    /// - Parameters:
+    ///   - isStale: asked once, after the modifier pre-flight and before the
+    ///     first event, exactly as in `apply`.
+    func replaceSelection(
+        with text: String,
+        targetLayoutID: String,
+        in bundleID: String?,
+        isStale: @escaping () -> Bool,
+        completion: @escaping (Result<FixProgress, FixFailure>) -> Void
+    ) {
+        queue.async {
+            completion(
+                self.performReplace(
+                    text, targetLayoutID: targetLayoutID, in: bundleID, isStale: isStale))
         }
     }
 
@@ -229,10 +347,205 @@ final class FixEngine: FixApplying {
         return .success(progress)
     }
 
+    /// Types over whatever the application has selected.
+    ///
+    /// The same sequence as `perform` with the delete loop taken out, because
+    /// typing over a selection replaces it natively — the application does the
+    /// deletion, atomically, and `deletedClusters` stays 0. A selection flip
+    /// must therefore never be routed through `apply`: its backspace burst
+    /// would collapse the selection with the first press and then eat the
+    /// characters in front of it with the rest.
+    private func performReplace(
+        _ text: String, targetLayoutID: String, in bundleID: String?, isStale: () -> Bool
+    ) -> Result<FixProgress, FixFailure> {
+        var progress = FixProgress()
+
+        if let error = waitForModifiers(limit: Timing.flipModifierRetryLimit) {
+            return .failure(FixFailure(error: error, progress: progress))
+        }
+        // The selection was read before the pre-flight above, which waits over a
+        // second for the hotkey chord to come up. A keystroke in that window
+        // moved the caret, replaced the selection, or both, and the text about
+        // to be typed describes a selection that is gone. Nothing has been
+        // posted yet, so abandoning here is free.
+        if isStale() {
+            Log.fix.info("flip abandoned: input arrived after the selection was read")
+            return .failure(FixFailure(error: .inputSinceVerification, progress: progress))
+        }
+        guard frontmost.currentBundleID() == bundleID else {
+            Log.fix.info("flip abandoned before it started: the frontmost app changed")
+            return .failure(FixFailure(error: .frontmostChanged, progress: progress))
+        }
+        guard let source = makeSource() else {
+            Log.fix.fault("could not create the injection event source; nothing was typed")
+            return .failure(FixFailure(error: .eventCreationFailed, progress: progress))
+        }
+
+        let inserting = text.utf16.count
+        for chunk in TextChunker.chunkUTF16(text, max: Timing.insertChunkLimit) {
+            guard frontmost.bundleID == bundleID else {
+                return .failure(
+                    fault(.frontmostChanged, progress: progress, deleting: 0, inserting: inserting))
+            }
+            guard postText(chunk, source: source) else {
+                return .failure(
+                    fault(
+                        .eventCreationFailed, progress: progress, deleting: 0, inserting: inserting)
+                )
+            }
+            progress.insertedUTF16Units += chunk.utf16.count
+        }
+
+        // Only now: the text was injected as unicode, so it does not depend on
+        // the active layout, but the *next* thing the user types does.
+        if let error = selectInputSource(targetLayoutID) {
+            return .failure(
+                fault(error, progress: progress, deleting: 0, inserting: inserting))
+        }
+
+        Log.fix.info(
+            "selection flipped: inserted \(progress.insertedUTF16Units, privacy: .public) UTF-16 units, layout \(targetLayoutID, privacy: .public)"
+        )
+        return .success(progress)
+    }
+
+    // MARK: - Reading the selection
+
+    private func performCopy(in bundleID: String?) -> CopyResult {
+        if let error = waitForModifiers(limit: Timing.flipModifierRetryLimit) {
+            return .couldNotTry(error)
+        }
+        // Authoritative, not the cache: the wait above can run for over a
+        // second, and a ⌘-Tab in that window would put the next app's selection
+        // on the pasteboard and offer to rewrite it in this one.
+        guard frontmost.currentBundleID() == bundleID else {
+            Log.fix.info("selection copy abandoned: the frontmost app changed")
+            return .couldNotTry(.frontmostChanged)
+        }
+        guard let source = makeSource() else {
+            Log.fix.fault("could not create the injection event source; no copy was attempted")
+            return .couldNotTry(.eventCreationFailed)
+        }
+
+        let board = NSPasteboard.general
+        let before = board.changeCount
+        let saved = snapshot(board)
+
+        guard postChord(Keycode.c, flags: .maskCommand, source: source) else {
+            Log.fix.fault("could not create the copy chord; the pasteboard was not touched")
+            return .couldNotTry(.eventCreationFailed)
+        }
+
+        guard waitForPasteboard(board, toChangeFrom: before) else {
+            // The application never wrote anything, so there is nothing to put
+            // back: the user's clipboard is exactly as they left it.
+            return .noSelection
+        }
+
+        guard let text = selectionText(on: board) else {
+            // The pasteboard moved even though the answer is unusable, so it
+            // still has to be restored.
+            restore(saved, to: board)
+            return .noSelection
+        }
+        restore(saved, to: board)
+        return .copied(text)
+    }
+
+    /// True once the application has answered the copy.
+    private func waitForPasteboard(_ board: NSPasteboard, toChangeFrom before: Int) -> Bool {
+        var waited: TimeInterval = 0
+        while waited < Timing.copyTimeout {
+            Thread.sleep(forTimeInterval: Timing.copyPollInterval)
+            waited += Timing.copyPollInterval
+            if board.changeCount != before { return true }
+        }
+        Thread.sleep(forTimeInterval: Timing.copyGrace)
+        return board.changeCount != before
+    }
+
+    /// The selection, if what the application wrote is text worth flipping.
+    ///
+    /// Everything rejected here is rejected because flipping it would be
+    /// destructive rather than merely useless: a copied file, image or link
+    /// retyped as Arabic letters replaces the thing the user selected with
+    /// nonsense.
+    private func selectionText(on board: NSPasteboard) -> String? {
+        // More than one item is a multiple selection — a row of files, a set of
+        // cells — and a single run of typed text cannot stand in for it.
+        guard let items = board.pasteboardItems, items.count == 1 else { return nil }
+        guard items[0].types.allSatisfy({ !Self.nonTextPasteboardTypes.contains($0) }) else {
+            return nil
+        }
+        guard let text = board.string(forType: .string) else { return nil }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        guard text.utf16.count <= Self.selectionLimitUTF16 else { return nil }
+        return text
+    }
+
+    // MARK: - Borrowing the pasteboard
+
+    /// The pasteboard's current contents, detached from the pasteboard.
+    ///
+    /// The limitation this accepts: promised and lazily-provided flavours — a
+    /// file promise, RTF a word processor only renders when something asks for
+    /// it — have no data yet and do not survive the round trip. Plain and rich
+    /// text, which is all a text selection ever puts here, do.
+    private func snapshot(_ board: NSPasteboard) -> [NSPasteboardItem] {
+        (board.pasteboardItems ?? []).map(Self.detachedCopy)
+    }
+
+    private static func detachedCopy(of original: NSPasteboardItem) -> NSPasteboardItem {
+        let copy = NSPasteboardItem()
+        for type in original.types {
+            if let data = original.data(forType: type) { copy.setData(data, forType: type) }
+        }
+        return copy
+    }
+
+    /// Puts the user's clipboard back, and checks that it stayed back.
+    private func restore(_ saved: [NSPasteboardItem], to board: NSPasteboard) {
+        let ours = write(saved, to: board)
+        Thread.sleep(forTimeInterval: Timing.copyRestoreRecheck)
+        // Electron apps answer ⌘C asynchronously and can write well after the
+        // change count first moved. One that lands here leaves the user's
+        // clipboard holding the text Harf was only supposed to read.
+        if board.changeCount != ours { _ = write(saved, to: board) }
+    }
+
+    /// - Returns: the change count the write produced.
+    private func write(_ saved: [NSPasteboardItem], to board: NSPasteboard) -> Int {
+        board.clearContents()
+        board.writeObjects(items(restoring: saved))
+        return board.changeCount
+    }
+
+    /// Fresh items for one write.
+    ///
+    /// An `NSPasteboardItem` belongs to the pasteboard it was written to and
+    /// cannot be written a second time, and the restore runs twice whenever a
+    /// late writer beats us to the board.
+    private func items(restoring saved: [NSPasteboardItem]) -> [NSPasteboardItem] {
+        var items = saved.map(Self.detachedCopy)
+        // The markers need a carrier even when the clipboard was empty, so that
+        // clearing it back to empty is still announced as ours.
+        if items.isEmpty { items = [NSPasteboardItem()] }
+        for type in Self.transientMarkerTypes { items[0].setData(Data(), forType: type) }
+        return items
+    }
+
     /// A half-applied edit is exactly what the log has to make visible.
     private func fault(_ error: FixError, progress: FixProgress, of fix: Fix) -> FixFailure {
+        fault(
+            error, progress: progress,
+            deleting: fix.deleteCount, inserting: fix.insertText.utf16.count)
+    }
+
+    private func fault(
+        _ error: FixError, progress: FixProgress, deleting: Int, inserting: Int
+    ) -> FixFailure {
         Log.fix.fault(
-            "fix failed (\(error.description, privacy: .public)) after deleting \(progress.deletedClusters, privacy: .public)/\(fix.deleteCount, privacy: .public) and inserting \(progress.insertedUTF16Units, privacy: .public)/\(fix.insertText.utf16.count, privacy: .public) UTF-16 units; no rollback attempted"
+            "fix failed (\(error.description, privacy: .public)) after deleting \(progress.deletedClusters, privacy: .public)/\(deleting, privacy: .public) and inserting \(progress.insertedUTF16Units, privacy: .public)/\(inserting, privacy: .public) UTF-16 units; no rollback attempted"
         )
         return FixFailure(error: error, progress: progress)
     }
@@ -242,11 +555,14 @@ final class FixEngine: FixApplying {
     /// Holding a modifier turns our backspaces into something else entirely
     /// (⌥⌫ deletes a word, ⌘⌫ a line), so the sequence waits for a clear
     /// keyboard and abandons the fix rather than starting one it cannot finish.
-    private func waitForModifiers() -> FixError? {
-        for attempt in 0...Timing.modifierRetryLimit {
+    ///
+    /// - Parameter limit: retries before giving up. The selection flip raises
+    ///   it, because its own hotkey is a chord the user is still holding.
+    private func waitForModifiers(limit: Int = Timing.modifierRetryLimit) -> FixError? {
+        for attempt in 0...limit {
             let flags = CGEventSource.flagsState(.combinedSessionState)
             if flags.isDisjoint(with: Self.blockingModifiers) { return nil }
-            if attempt < Timing.modifierRetryLimit {
+            if attempt < limit {
                 Thread.sleep(forTimeInterval: Timing.modifierRetryDelay)
             }
         }
@@ -264,17 +580,41 @@ final class FixEngine: FixApplying {
         return source
     }
 
-    /// A key event with the live modifier state stripped.
+    /// A key event whose modifier state is stated rather than inherited.
     ///
     /// The event source inherits whatever modifiers are physically down, and a
     /// stale Caps Lock or Shift bit would change what the receiving app makes
-    /// of the keystroke. The flags are cleared here, at creation, so that
-    /// nothing touches the event after its unicode payload is set.
-    private func makeKeyEvent(source: CGEventSource, keycode: CGKeyCode, down: Bool) -> CGEvent? {
+    /// of the keystroke. `postText` and `postBackspace` therefore pass no flags
+    /// and must keep passing none — a backspace that arrives with ⌥ set deletes
+    /// a whole word. Only `postChord` sets any. The flags are written here, at
+    /// creation, so that nothing touches the event after its unicode payload is
+    /// set.
+    private func makeKeyEvent(
+        source: CGEventSource, keycode: CGKeyCode, down: Bool, flags: CGEventFlags = []
+    ) -> CGEvent? {
         guard let event = CGEvent(keyboardEventSource: source, virtualKey: keycode, keyDown: down)
         else { return nil }
-        event.flags = []
+        event.flags = flags
         return event
+    }
+
+    /// A modified key press: down then up, both carrying `flags`.
+    ///
+    /// The up event carries `.maskCommand` as well, not just the down: an app
+    /// that sees ⌘ come up before C does reads the pair as a bare C and types a
+    /// letter into the document instead of copying. Posted from the marked
+    /// source, so `EventTapController.isSelfInjected` passes it through to the
+    /// app untouched rather than buffering it as something the user typed.
+    private func postChord(_ keycode: UInt16, flags: CGEventFlags, source: CGEventSource) -> Bool {
+        let key = CGKeyCode(keycode)
+        guard
+            let down = makeKeyEvent(source: source, keycode: key, down: true, flags: flags),
+            let up = makeKeyEvent(source: source, keycode: key, down: false, flags: flags)
+        else { return false }
+
+        post(down, then: Timing.chordInterval)
+        post(up, then: Timing.chordInterval)
+        return true
     }
 
     private func postBackspace(source: CGEventSource) -> Bool {

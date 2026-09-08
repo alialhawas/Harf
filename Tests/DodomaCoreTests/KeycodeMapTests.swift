@@ -1,3 +1,4 @@
+import Carbon.HIToolbox
 import XCTest
 
 @testable import DodomaCore
@@ -36,6 +37,10 @@ final class KeycodeMapTests: XCTestCase {
 
     func testEmptyInputYieldsNoKeys() {
         XCTAssertEqual(KeycodeMap.keys(forLatin: ""), [])
+    }
+
+    func testCopyKeycodeMatchesCarbon() {
+        XCTAssertEqual(Keycode.c, UInt16(kVK_ANSI_C))
     }
 
     func testUnmappableCharactersReturnNil() {

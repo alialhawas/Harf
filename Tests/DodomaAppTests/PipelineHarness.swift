@@ -41,10 +41,56 @@ final class FakeFixEngine: FixApplying {
     /// pass every test in this file, which is exactly what happened once.
     var afterApply: ((Fix) -> Void)?
 
+    /// What the next `copySelection` reports back. Defaults to the answer an
+    /// application with nothing selected gives.
+    var copyResult: CopyResult = .noSelection
+
+    /// Run on the pipeline queue after the copy is notionally in flight and
+    /// before it is answered. The only way to reproduce a keystroke landing in
+    /// the middle of the ⌘C round trip, which for a real copy is the better
+    /// part of a second.
+    var beforeCopyAnswer: (() -> Void)?
+
+    /// What the next `replaceSelection` reports back. One inserted unit and
+    /// nothing deleted, which is the shape every successful selection flip has:
+    /// typing over a selection deletes nothing itself.
+    var replaceResult: Result<FixProgress, FixFailure> = .success(
+        FixProgress(deletedClusters: 0, insertedUTF16Units: 1))
+
+    /// Run after the completion handler, with the layout the flip selected.
+    /// The counterpart of `afterApply`, and there for the same reason: a
+    /// selection flip ends in `TISSelectInputSource` too, and the system
+    /// announces that back to the app as an input a few milliseconds later.
+    var afterReplace: ((String) -> Void)?
+
+    struct Replacement: Equatable {
+        let text: String
+        let targetLayoutID: String
+        let bundleID: String?
+        /// Whether the pipeline's abort predicate said the selection read had
+        /// gone stale by the time the engine asked.
+        let staleWhenAsked: Bool
+    }
+
+    private var replacements: [Replacement] = []
+    private var copies = 0
+
     var applied: [Call] {
         lock.lock()
         defer { lock.unlock() }
         return calls
+    }
+
+    var replaced: [Replacement] {
+        lock.lock()
+        defer { lock.unlock() }
+        return replacements
+    }
+
+    var copyCalls: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return copies
     }
 
     var lastFix: Fix? { applied.last?.fix }
@@ -64,6 +110,36 @@ final class FakeFixEngine: FixApplying {
         // Only a sequence that got as far as switching the layout announces
         // one, which is the successful one.
         if case .success = result { afterApply?(fix) }
+    }
+
+    func copySelection(in bundleID: String?, completion: @escaping (CopyResult) -> Void) {
+        lock.lock()
+        copies += 1
+        let result = copyResult
+        lock.unlock()
+        beforeCopyAnswer?()
+        completion(result)
+    }
+
+    func replaceSelection(
+        with text: String,
+        targetLayoutID: String,
+        in bundleID: String?,
+        isStale: @escaping () -> Bool,
+        completion: @escaping (Result<FixProgress, FixFailure>) -> Void
+    ) {
+        lock.lock()
+        replacements.append(
+            Replacement(
+                text: text, targetLayoutID: targetLayoutID, bundleID: bundleID,
+                staleWhenAsked: isStale()))
+        let result = self.replaceResult
+        lock.unlock()
+        duringApply?()
+        completion(result)
+        // Only a sequence that got as far as switching the layout announces
+        // one, which is the successful one.
+        if case .success = result { afterReplace?(targetLayoutID) }
     }
 }
 
@@ -199,6 +275,10 @@ final class PipelineHarness {
         engine.afterApply = { [weak self] fix in
             self?.noteLayoutSwitch(fix.targetLayoutID)
             self?.pipeline.inputSourceChanged(to: fix.targetLayoutID)
+        }
+        engine.afterReplace = { [weak self] targetLayoutID in
+            self?.noteLayoutSwitch(targetLayoutID)
+            self?.pipeline.inputSourceChanged(to: targetLayoutID)
         }
 
         pipeline.setCaptureActive(true)
