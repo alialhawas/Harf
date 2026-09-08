@@ -16,8 +16,16 @@ public final class UserLexicon: @unchecked Sendable {
     /// Sightings before a word counts. High enough that a one-off wrong-layout
     /// run that slipped past the detector never reaches it.
     public static let promotionThreshold = 10
-    /// Shorter than this and a token is not vocabulary, it is noise.
+    /// Shorter than this and a counted token is not vocabulary, it is noise.
     public static let minimumLength = 3
+    /// Floor for a word put here by hand.
+    ///
+    /// `pr` is the example in this file's own header, and counting can never
+    /// reach it: two-letter tokens are dropped on the way in precisely because
+    /// a passive count cannot tell a word from a fragment. Somebody typing the
+    /// word out and asking for it is the evidence the counter is missing, so
+    /// the manual path is the one place the floor drops.
+    public static let manualMinimumLength = 2
     /// Ceiling on remembered words per language; the rarest are dropped first.
     public static let capacity = 8_000
 
@@ -51,12 +59,17 @@ public final class UserLexicon: @unchecked Sendable {
     /// tāʾ marbūṭa folded would never match the word that taught it. The
     /// normalisation is idempotent, so the scoring path — which hands over
     /// already-normalised forms — pays only for a scan of a short token.
+    ///
+    /// The two routes have different floors. A hand-added `pr` is a claim about
+    /// this user's vocabulary and is honoured at two letters; a counted `pr` is
+    /// a two-letter fragment that happened to recur, and is not.
     public func contains(_ token: String, language: Language) -> Bool {
-        guard token.count >= Self.minimumLength else { return false }
+        guard token.count >= Self.manualMinimumLength else { return false }
         let key = LanguageModel.normalize(token, for: language)
         lock.lock(); defer { lock.unlock() }
         guard let store = stores[language.rawValue] else { return false }
         if store.manual.contains(key) { return true }
+        guard token.count >= Self.minimumLength else { return false }
         return (store.counts[key] ?? 0) >= Self.promotionThreshold
     }
 
@@ -129,9 +142,14 @@ public final class UserLexicon: @unchecked Sendable {
         return promoted
     }
 
+    /// Records a word by hand, past the counting.
+    ///
+    /// Held to `manualMinimumLength` rather than `minimumLength`: this is the
+    /// only route to the short words — `pr`, `qa`, `ci` — that `observe` throws
+    /// away as noise before it can ever count them.
     public func add(_ word: String, language: Language) {
         let trimmed = word.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.count >= Self.minimumLength else { return }
+        guard trimmed.count >= Self.manualMinimumLength else { return }
         let key = LanguageModel.normalize(trimmed, for: language)
         lock.lock(); defer { lock.unlock() }
         var store = stores[language.rawValue] ?? Store()
@@ -147,6 +165,22 @@ public final class UserLexicon: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         guard var store = stores[language.rawValue] else { return }
         store.manual.removeAll { $0 == key }
+        store.counts[key] = nil
+        stores[language.rawValue] = store
+        dirty = true
+    }
+
+    /// Drops what counting learned about a word, leaving a hand-added entry
+    /// alone.
+    ///
+    /// A flip is the user saying the run was never words in this language, so
+    /// the sightings it accumulated were miscounted and go. A word somebody
+    /// typed out and asked for outranks that inference, and is never touched:
+    /// `remove` is the way to take one of those back.
+    public func forgetCount(_ word: String, language: Language) {
+        let key = LanguageModel.normalize(word, for: language)
+        lock.lock(); defer { lock.unlock() }
+        guard var store = stores[language.rawValue], !store.manual.contains(key) else { return }
         store.counts[key] = nil
         stores[language.rawValue] = store
         dirty = true

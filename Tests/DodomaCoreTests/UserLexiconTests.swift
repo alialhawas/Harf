@@ -154,6 +154,51 @@ extension UserLexiconTests {
             ["kubectl", "endpoint"])
     }
 
+    // MARK: - Taking back a miscount
+
+    /// A flip says the run was never words in that language, so the sightings
+    /// it accumulated were counted in error.
+    func testForgetCountClearsWhatCountingLearned() {
+        let lexicon = UserLexicon(url: nil)
+        for _ in 0..<UserLexicon.promotionThreshold {
+            _ = lexicon.observe(["hgsghl"], language: .english)
+        }
+        XCTAssertTrue(lexicon.contains("hgsghl", language: .english))
+
+        lexicon.forgetCount("hgsghl", language: .english)
+        XCTAssertFalse(lexicon.contains("hgsghl", language: .english))
+    }
+
+    /// A word typed out and asked for outranks anything inferred from a flip.
+    func testForgetCountLeavesAHandAddedWordAlone() {
+        let lexicon = UserLexicon(url: nil)
+        lexicon.add("kubectl", language: .english)
+
+        lexicon.forgetCount("kubectl", language: .english)
+        XCTAssertTrue(lexicon.contains("kubectl", language: .english))
+    }
+
+    /// `pr` is a word this user writes hourly and one counting can never reach,
+    /// which is what the manual list is for.
+    func testATwoLetterWordCanBeAddedByHand() {
+        let lexicon = UserLexicon(url: nil)
+        lexicon.add("pr", language: .english)
+
+        XCTAssertTrue(lexicon.contains("pr", language: .english))
+    }
+
+    /// The lower floor is the manual route's alone: a two-letter token that
+    /// merely recurs is still a fragment.
+    func testATwoLetterTokenIsStillNeverCounted() {
+        let lexicon = UserLexicon(url: nil)
+        for _ in 0..<(UserLexicon.promotionThreshold * 3) {
+            _ = lexicon.observe(["pr"], language: .english)
+        }
+
+        XCTAssertFalse(lexicon.contains("pr", language: .english))
+        XCTAssertTrue(lexicon.pending(.english).isEmpty)
+    }
+
     /// Undo is a real removal, so a word can be learned again later rather than
     /// being permanently suppressed.
     func testAnUndoneWordCanBeLearnedAgain() {
