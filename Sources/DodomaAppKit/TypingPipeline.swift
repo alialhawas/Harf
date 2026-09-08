@@ -1663,11 +1663,18 @@ final class TypingPipeline {
         // selection, no answer at all — saw nothing either way, and the
         // injector reported success. Only a reading that positively disagrees
         // counts against it.
-        guard case .value(let text) = read else { return true }
-        let actual = Array(text.utf16)
-        let expected = Array(flip.flipped.utf16)
-        guard actual.count >= expected.count else { return false }
-        return Array(actual.suffix(expected.count)) == expected
+        guard case .value = read else { return true }
+        // The same comparison the automatic path trusts before it deletes,
+        // partial-match rule included. A terminal reports only its visible
+        // line, so the read-back can be shorter than the flip and still agree
+        // with it; refusing an undo for that would take ⌘⌥Z away precisely
+        // where a flip that went wrong needs it most.
+        if case .proceed = CaretVerification.verdict(
+            read: read, replacedText: flip.flipped, mode: .required)
+        {
+            return true
+        }
+        return false
     }
 
     private func recordFlip(

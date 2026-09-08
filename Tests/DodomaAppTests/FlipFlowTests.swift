@@ -148,6 +148,20 @@ final class FlipFlowTests: XCTestCase {
         XCTAssertTrue(harness.flips.isEmpty, "and no card claims a flip that is not there")
     }
 
+    /// A terminal reports only its visible line, so the read-back can come
+    /// back shorter than the flip and still agree with it. The automatic path
+    /// already accepts that before deleting; refusing an undo for it here
+    /// would take ⌘⌥Z away precisely where a flip that went wrong needs it.
+    func testAShortButAgreeingReadBackStillArmsUndo() {
+        harness.oracle.answer(caret: .value(String(arabic.suffix(4))))
+        harness.flip()
+
+        XCTAssertEqual(harness.engine.replaced.count, 1)
+        XCTAssertNotNil(harness.pipeline.undoableFix())
+        XCTAssertEqual(harness.rejectionCount, 0)
+        XCTAssertEqual(harness.awaitFlipCard(self)?.flipped, arabic)
+    }
+
     func testTheFlippedTextIsNotOfferedAgain() {
         harness.flip()
         harness.waitForApplyTail(self)
