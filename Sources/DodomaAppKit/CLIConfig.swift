@@ -231,7 +231,7 @@ enum CLIConfig {
 
         switch action {
         case nil, "list":
-            for lang in language.map { [$0] } ?? [.english, .arabic] {
+            for lang in language.map({ [$0] }) ?? [.english, .arabic] {
                 let learned = lexicon.learned(lang)
                 let manual = lexicon.manualWords(lang)
                 let pending = lexicon.pending(lang)
