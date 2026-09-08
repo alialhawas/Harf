@@ -5,7 +5,7 @@ import DodomaCore
 import Foundation
 
 /// Why a fix could not be written to the screen.
-enum FixError: Error, CustomStringConvertible {
+enum FixError: Error, Equatable, CustomStringConvertible {
     /// A command chord was in progress; rewriting under it would send the
     /// deletes to whatever the chord is doing.
     case modifierHeld
@@ -21,6 +21,9 @@ enum FixError: Error, CustomStringConvertible {
     /// Input arrived after the caret was verified, so the verification no
     /// longer describes the screen the burst is about to delete from.
     case inputSinceVerification
+    /// The span the fix names is not one a backspace burst may be counted
+    /// against. See `DeleteRefusal`.
+    case unsafeDelete(DeleteRefusal)
 
     var description: String {
         switch self {
@@ -29,6 +32,7 @@ enum FixError: Error, CustomStringConvertible {
         case .layoutNotFound: return "layoutNotFound"
         case .eventCreationFailed: return "eventCreationFailed"
         case .inputSinceVerification: return "inputSinceVerification"
+        case .unsafeDelete(let refusal): return "unsafeDelete(\(refusal.rawValue))"
         }
     }
 
@@ -37,7 +41,7 @@ enum FixError: Error, CustomStringConvertible {
     var isTransient: Bool {
         switch self {
         case .modifierHeld, .inputSinceVerification: return true
-        case .frontmostChanged, .layoutNotFound, .eventCreationFailed: return false
+        case .frontmostChanged, .layoutNotFound, .eventCreationFailed, .unsafeDelete: return false
         }
     }
 }
@@ -72,6 +76,13 @@ enum CopyResult: Equatable {
     /// The application answered and there was nothing selected, or what it put
     /// on the pasteboard was not text a flip can be about.
     case noSelection
+    /// The application never answered, even after the grace period.
+    ///
+    /// Deliberately not `noSelection`: an application that was too slow looks
+    /// exactly like one with nothing highlighted, and reading it as the second
+    /// sends the flip to the typed run — a rewrite of a different span of the
+    /// document from the one the user was pointing at.
+    case timedOut
     /// The copy was never attempted, or was attempted and cannot be trusted.
     case couldNotTry(FixError)
 }
@@ -127,6 +138,12 @@ final class FixEngine: FixApplying {
         /// start dropping deletes when this goes too low; 3 ms is the fastest
         /// value that still left every surface in the manual runbook intact.
         static let backspaceInterval: TimeInterval = 0.003
+        /// Clusters between the authoritative checks inside the burst.
+        ///
+        /// Ten of them is about 60 ms, which is short enough that a ⌘-Tab
+        /// cannot cost more than a handful of backspaces and long enough that
+        /// the main-thread round trip the check makes is not paid per event.
+        static let deleteCheckpointInterval = 10
         /// Let the app settle after the burst before text arrives.
         static let postDeleteGap: TimeInterval = 0.015
         /// Between the events of the insertion.
@@ -204,14 +221,50 @@ final class FixEngine: FixApplying {
         .maskShift, .maskCommand, .maskControl, .maskAlternate,
     ]
 
-    private let queue = DispatchQueue(label: "com.ali.dodoma.fixengine", qos: .userInitiated)
-    private let frontmost: FrontmostAppTracker
+    /// Everything in the sequence that needs a real machine, in one value.
+    ///
+    /// A struct of closures rather than a protocol because each production
+    /// value is a single expression, and because a test needs to answer them
+    /// differently from one event to the next — the caret gone stale on the
+    /// fourth backspace, another application in front by the tenth. Without a
+    /// seam here the only way to test the burst is to post it at whatever
+    /// window the person running the suite has in front of them.
+    struct Machine {
+        /// Sends one made event to the window server.
+        var post: (CGEvent) -> Void
+        /// The modifiers physically held down right now.
+        var modifierFlags: () -> CGEventFlags
+        /// The cached frontmost identifier, cheap enough to read between the
+        /// individual events of a burst.
+        var cachedBundleID: () -> String?
+        /// The authoritative read, which hops to the main thread. Used at the
+        /// checkpoints, where a notification's worth of staleness is not
+        /// acceptable.
+        var currentBundleID: () -> String?
+        /// Selects a keyboard layout, returning nil on success.
+        var selectLayout: (String) -> FixError?
 
-    /// - Parameter frontmost: the app's single tracker. Deliberately without a
-    ///   default: a second tracker would mean a second activation observer and
-    ///   two caches that can disagree about when the switch happened.
-    init(frontmost: FrontmostAppTracker) {
-        self.frontmost = frontmost
+        static func real(_ frontmost: FrontmostAppTracker) -> Machine {
+            Machine(
+                post: { $0.post(tap: .cghidEventTap) },
+                modifierFlags: { CGEventSource.flagsState(.combinedSessionState) },
+                cachedBundleID: { frontmost.bundleID },
+                currentBundleID: { frontmost.currentBundleID() },
+                selectLayout: { FixEngine.selectInputSource($0) })
+        }
+    }
+
+    private let queue = DispatchQueue(label: "com.ali.dodoma.fixengine", qos: .userInitiated)
+    private let machine: Machine
+
+    /// - Parameters:
+    ///   - frontmost: the app's single tracker. Deliberately without a default:
+    ///     a second tracker would mean a second activation observer and two
+    ///     caches that can disagree about when the switch happened.
+    ///   - machine: the seam above. Nil — the only value production passes —
+    ///     means the real window server and the real tracker.
+    init(frontmost: FrontmostAppTracker, machine: Machine? = nil) {
+        self.machine = machine ?? .real(frontmost)
     }
 
     /// Applies `fix` and reports the outcome on the engine's own queue.
@@ -278,6 +331,20 @@ final class FixEngine: FixApplying {
     ) -> Result<FixProgress, FixFailure> {
         var progress = FixProgress()
 
+        // Before the pre-flight, because it is not about timing: a span this
+        // says no to is one no burst may ever be counted against, and the
+        // pipeline has already refused it once. This is the second of the two
+        // checks, so that a path added later cannot reach the keyboard without
+        // passing one of them.
+        if let refusal = TextGuards.deleteRefusal(
+            deleting: fix.deleteCount, of: fix.replacedText)
+        {
+            Log.fix.fault(
+                "fix refused before anything was posted: \(refusal.rawValue, privacy: .public), \(fix.deleteCount, privacy: .public) clusters"
+            )
+            return .failure(FixFailure(error: .unsafeDelete(refusal), progress: progress))
+        }
+
         if let error = waitForModifiers() {
             return .failure(FixFailure(error: error, progress: progress))
         }
@@ -295,7 +362,7 @@ final class FixEngine: FixApplying {
         // The decision was made up to a second ago, and the pre-flight above may
         // have waited half a second more. A ⌘-Tab in that window would send the
         // whole burst into an app that was never allowed to be rewritten.
-        guard frontmost.currentBundleID() == bundleID else {
+        guard machine.currentBundleID() == bundleID else {
             Log.fix.info("fix abandoned before it started: the frontmost app changed")
             return .failure(FixFailure(error: .frontmostChanged, progress: progress))
         }
@@ -308,7 +375,22 @@ final class FixEngine: FixApplying {
         // loop: 23 clusters is nearly half a second of backspaces, and each one
         // that lands in the wrong window deletes somebody's text.
         while progress.deletedClusters < fix.deleteCount {
-            guard frontmost.bundleID == bundleID else {
+            // The cached identifier is a notification behind, and `isStale` was
+            // last asked before the burst began. Neither is worth a main-thread
+            // round trip per event, and both are worth one every so often: a
+            // ⌘-Tab or a keystroke a tenth of a second into the burst leaves
+            // every remaining backspace landing somewhere nobody checked.
+            if progress.deletedClusters > 0,
+               progress.deletedClusters % Timing.deleteCheckpointInterval == 0
+            {
+                guard machine.currentBundleID() == bundleID else {
+                    return .failure(fault(.frontmostChanged, progress: progress, of: fix))
+                }
+                if isStale() {
+                    return .failure(fault(.inputSinceVerification, progress: progress, of: fix))
+                }
+            }
+            guard machine.cachedBundleID() == bundleID else {
                 return .failure(fault(.frontmostChanged, progress: progress, of: fix))
             }
             guard postBackspace(source: source) else {
@@ -321,12 +403,12 @@ final class FixEngine: FixApplying {
 
         // Authoritative check at the checkpoint between the two halves:
         // inserting Arabic into someone else's window would be worse still.
-        guard frontmost.currentBundleID() == bundleID else {
+        guard machine.currentBundleID() == bundleID else {
             return .failure(fault(.frontmostChanged, progress: progress, of: fix))
         }
 
         for chunk in TextChunker.chunkUTF16(fix.insertText, max: Timing.insertChunkLimit) {
-            guard frontmost.bundleID == bundleID else {
+            guard machine.cachedBundleID() == bundleID else {
                 return .failure(fault(.frontmostChanged, progress: progress, of: fix))
             }
             guard postText(chunk, source: source) else {
@@ -337,7 +419,7 @@ final class FixEngine: FixApplying {
 
         // Only now: the text was injected as unicode, so it does not depend on
         // the active layout, but the *next* thing the user types does.
-        if let error = selectInputSource(fix.targetLayoutID) {
+        if let error = machine.selectLayout(fix.targetLayoutID) {
             return .failure(fault(error, progress: progress, of: fix))
         }
 
@@ -372,7 +454,7 @@ final class FixEngine: FixApplying {
             Log.fix.info("flip abandoned: input arrived after the selection was read")
             return .failure(FixFailure(error: .inputSinceVerification, progress: progress))
         }
-        guard frontmost.currentBundleID() == bundleID else {
+        guard machine.currentBundleID() == bundleID else {
             Log.fix.info("flip abandoned before it started: the frontmost app changed")
             return .failure(FixFailure(error: .frontmostChanged, progress: progress))
         }
@@ -383,7 +465,7 @@ final class FixEngine: FixApplying {
 
         let inserting = text.utf16.count
         for chunk in TextChunker.chunkUTF16(text, max: Timing.insertChunkLimit) {
-            guard frontmost.bundleID == bundleID else {
+            guard machine.cachedBundleID() == bundleID else {
                 return .failure(
                     fault(.frontmostChanged, progress: progress, deleting: 0, inserting: inserting))
             }
@@ -398,7 +480,7 @@ final class FixEngine: FixApplying {
 
         // Only now: the text was injected as unicode, so it does not depend on
         // the active layout, but the *next* thing the user types does.
-        if let error = selectInputSource(targetLayoutID) {
+        if let error = machine.selectLayout(targetLayoutID) {
             return .failure(
                 fault(error, progress: progress, deleting: 0, inserting: inserting))
         }
@@ -418,7 +500,7 @@ final class FixEngine: FixApplying {
         // Authoritative, not the cache: the wait above can run for over a
         // second, and a ⌘-Tab in that window would put the next app's selection
         // on the pasteboard and offer to rewrite it in this one.
-        guard frontmost.currentBundleID() == bundleID else {
+        guard machine.currentBundleID() == bundleID else {
             Log.fix.info("selection copy abandoned: the frontmost app changed")
             return .couldNotTry(.frontmostChanged)
         }
@@ -438,8 +520,12 @@ final class FixEngine: FixApplying {
 
         guard waitForPasteboard(board, toChangeFrom: before) else {
             // The application never wrote anything, so there is nothing to put
-            // back: the user's clipboard is exactly as they left it.
-            return .noSelection
+            // back: the user's clipboard is exactly as they left it. Whether
+            // that is an empty selection or an application slower than the
+            // grace period cannot be told apart from here, so it is not told
+            // apart — see `CopyResult.timedOut`.
+            Log.fix.info("selection copy went unanswered")
+            return .timedOut
         }
 
         guard let text = selectionText(on: board) else {
@@ -560,7 +646,7 @@ final class FixEngine: FixApplying {
     ///   it, because its own hotkey is a chord the user is still holding.
     private func waitForModifiers(limit: Int = Timing.modifierRetryLimit) -> FixError? {
         for attempt in 0...limit {
-            let flags = CGEventSource.flagsState(.combinedSessionState)
+            let flags = machine.modifierFlags()
             if flags.isDisjoint(with: Self.blockingModifiers) { return nil }
             if attempt < limit {
                 Thread.sleep(forTimeInterval: Timing.modifierRetryDelay)
@@ -636,10 +722,25 @@ final class FixEngine: FixApplying {
             let up = makeKeyEvent(source: source, keycode: 0, down: false)
         else { return false }
 
+        // Only the key-down carries the text. Text input happens on key-down
+        // everywhere it is AppKit that does it, but an app that reads the
+        // characters off the key-up as well — several cross-platform toolkits
+        // and terminal emulators do — inserts the payload a second time, which
+        // on screen is the correction typed twice with nothing between the two
+        // copies. The key-up is still posted, because an app that tracks key
+        // state would be left believing the key is held.
+        //
+        // The up event is given an explicitly *empty* string rather than left
+        // alone. Both events carry virtual key 0, which is `a` on a US layout
+        // and ش on an Arabic one; an app that reads the key-up and finds no
+        // unicode override falls back to translating that keycode, so "leave it
+        // alone" is not the same as "insert nothing" — it is a stray letter at
+        // the end of every correction. Zero length says nothing, positively.
+        //
         // Last write before posting. Setting any other field afterwards is
         // undocumented territory and has been observed to drop the payload.
         down.keyboardSetUnicodeString(stringLength: units.count, unicodeString: &units)
-        up.keyboardSetUnicodeString(stringLength: units.count, unicodeString: &units)
+        up.keyboardSetUnicodeString(stringLength: 0, unicodeString: nil)
 
         post(down, then: Timing.insertInterval)
         post(up, then: Timing.insertInterval)
@@ -647,7 +748,7 @@ final class FixEngine: FixApplying {
     }
 
     private func post(_ event: CGEvent, then pause: TimeInterval) {
-        event.post(tap: .cghidEventTap)
+        machine.post(event)
         Thread.sleep(forTimeInterval: pause)
     }
 
@@ -656,7 +757,7 @@ final class FixEngine: FixApplying {
     /// Switches the keyboard layout and waits for the confirmation
     /// notification, so the caller can rely on the next keystroke being typed
     /// in the language the text is now in. Returns nil on success.
-    private func selectInputSource(_ sourceID: String) -> FixError? {
+    private static func selectInputSource(_ sourceID: String) -> FixError? {
         let center = DistributedNotificationCenter.default()
         let name = Notification.Name(kTISNotifySelectedKeyboardInputSourceChanged as String)
         let confirmed = DispatchSemaphore(value: 0)

@@ -64,7 +64,9 @@ public struct FixHistory: Equatable, Sendable {
         /// The undo ran.
         case undone
         /// The buffer was purged for a reason that also forbids keeping the
-        /// user's text around — see `ResetReason.purgesHistory`.
+        /// user's text around — see `ResetReason.purgesHistory` — or for one
+        /// that says the text on screen is no longer the text the fix left
+        /// there, which an undo would delete backwards from all the same.
         case purged
     }
 

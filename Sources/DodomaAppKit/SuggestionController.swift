@@ -110,6 +110,7 @@ final class SuggestionController {
         card: SuggestionCard, size: CGSize, anchor: CaretAnchor, geometry: ScreenGeometry,
         rightToLeft: Bool
     ) {
+        let generation = self.generation
         let panel = self.panel ?? makePanel()
         self.panel = panel
 
@@ -136,9 +137,24 @@ final class SuggestionController {
             panel.animator().alphaValue = 1
         }
 
-        state.show(
-            displayFrame: ScreenCoordinates.displayRect(
-                fromAppKit: frame, primaryScreenMaxY: geometry.primaryMaxY))
+        // One hop later than the window itself, and only if the offer is still
+        // standing by then.
+        //
+        // This is the flag the tap thread reads to decide whether to swallow
+        // Tab and Escape, so setting it commits the panel's keys to a card the
+        // pipeline may already have withdrawn: the withdrawal arrives here as a
+        // `dismiss()` hopped onto this queue, and the caret lookup that got us
+        // here was queued ahead of it. Deferring by one hop puts the two back in
+        // the order the pipeline decided them in — the dismissal bumps the
+        // generation, and this is skipped. Nothing is lost by the delay: the
+        // card is still fading in, and the keys are the pipeline's to answer
+        // only once it has an offer to answer them with.
+        let displayFrame = ScreenCoordinates.displayRect(
+            fromAppKit: frame, primaryScreenMaxY: geometry.primaryMaxY)
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.generation == generation else { return }
+            self.state.show(displayFrame: displayFrame)
+        }
 
         Log.pipeline.debug(
             "suggestion panel shown, anchor quality \(anchor.quality.rawValue, privacy: .public)")

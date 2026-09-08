@@ -24,8 +24,13 @@ final class DebugWindowController {
 
     private let model = DebugWindowModel()
     private var window: NSWindow?
+    private var closeObserver: NSObjectProtocol?
 
-    private var pending: BufferSnapshot?
+    /// The newest snapshot waiting to be drawn. Non-nil only while the window
+    /// is open: it holds the buffer text and the last fifty keystrokes, and
+    /// keeping one for a window nobody has opened is retention with no reader.
+    /// Readable for the test that pins that.
+    private(set) var pending: BufferSnapshot?
     private var flushScheduled = false
     private var lastFlush: TimeInterval = 0
 
@@ -45,10 +50,14 @@ final class DebugWindowController {
 
     /// Main thread only.
     private func enqueue(_ snapshot: BufferSnapshot) {
+        // Ahead of the store, not after it. A closed window has no reader, and
+        // holding the newest snapshot for one meant the last thing typed before
+        // the window was ever opened stayed in memory for the life of the
+        // process and was then shown retroactively — the debug window is opt-in
+        // precisely because its contents are the user's keystrokes.
+        guard window?.isVisible == true else { return }
         pending = snapshot
-
-        // Keep the newest snapshot around but do no UI work while hidden.
-        guard window?.isVisible == true, !flushScheduled else { return }
+        guard !flushScheduled else { return }
 
         let elapsed = Date().timeIntervalSinceReferenceDate - lastFlush
         if elapsed >= Self.refreshInterval {
@@ -80,6 +89,18 @@ final class DebugWindowController {
         flush()
     }
 
+    /// Everything the window was showing goes when it closes.
+    ///
+    /// Closing it is the user saying they are done watching their own
+    /// keystrokes. Leaving the model populated would keep the buffer text and
+    /// the last fifty keys alive behind a window that is gone, and put them
+    /// back on screen the next time it is opened.
+    private func forget() {
+        pending = nil
+        model.snapshot = BufferSnapshot()
+        model.decision = nil
+    }
+
     private func makeWindow() -> NSWindow {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 560, height: 520),
@@ -92,7 +113,18 @@ final class DebugWindowController {
         window.contentView = NSHostingView(rootView: DebugView(model: model))
         window.center()
         window.setFrameAutosaveName("HarfDebugWindow")
+        closeObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: window, queue: .main
+        ) { [weak self] _ in
+            self?.forget()
+        }
         return window
+    }
+
+    deinit {
+        if let closeObserver {
+            NotificationCenter.default.removeObserver(closeObserver)
+        }
     }
 }
 

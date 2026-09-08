@@ -16,6 +16,11 @@ public enum ResetReason: String, Equatable, Hashable, Sendable, CaseIterable {
     case manual
     case secureInput
     case overflow
+    /// Keystrokes reached the screen without reaching the buffer, so the
+    /// buffer no longer describes the text in front of the caret. The event
+    /// tap raises it when the system disables it and when it drops an
+    /// autorepeat burst.
+    case tapInterrupted
 
     /// Whether clearing the buffer must also throw away everything else that
     /// holds the user's text: the debug event log, and the undo slot.
@@ -32,12 +37,18 @@ public enum ResetReason: String, Equatable, Hashable, Sendable, CaseIterable {
     /// clear has to be retroactive or the drop protects nothing. Keyed off the
     /// reason rather than left to each caller so that no future reset path can
     /// forget it.
+    ///
+    /// `tapInterrupted` is deliberately not one of them. The keystrokes the
+    /// buffer missed are exactly what the debug window is for, and they were
+    /// never ours to lose rather than never ours to keep. Its own undo slot is
+    /// given up by the pipeline, which is the only thing that knows what the
+    /// tap missed.
     public var purgesHistory: Bool {
         switch self {
         case .secureInput:
             return true
         case .enterKey, .tabKey, .escapeKey, .arrowNav, .modifierChord, .mouseDown, .appChanged,
-             .focusChanged, .inputSourceChanged, .idleTimeout, .manual, .overflow:
+             .focusChanged, .inputSourceChanged, .idleTimeout, .manual, .overflow, .tapInterrupted:
             return false
         }
     }

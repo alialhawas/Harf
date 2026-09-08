@@ -72,6 +72,30 @@ final class UserLexiconTests: XCTestCase {
         XCTAssertTrue(second.contains("خوارزمية", language: .arabic))
     }
 
+    /// A word still counting has changed no score. What it would put on disk is
+    /// nothing but a record that this person typed it, so it stays in memory for
+    /// as long as the app is running and no longer.
+    func testAWordStillCountingNeverReachesDisk() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lex-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let first = UserLexicon(url: url)
+        for _ in 1..<UserLexicon.promotionThreshold {
+            first.observe(["passphrase"], language: .english)
+        }
+        first.add("kubectl", language: .english)
+        XCTAssertEqual(first.pending(.english).map(\.word), ["passphrase"], "held in memory")
+        XCTAssertTrue(first.save())
+
+        let written = try XCTUnwrap(String(data: Data(contentsOf: url), encoding: .utf8))
+        XCTAssertFalse(written.contains("passphrase"))
+        XCTAssertTrue(written.contains("kubectl"))
+
+        let second = UserLexicon(url: url)
+        XCTAssertTrue(second.pending(.english).isEmpty)
+    }
+
     /// A learned word lifts the score of text containing it, which is the only
     /// reason the lexicon exists.
     func testALearnedWordRaisesDictionaryCoverage() throws {

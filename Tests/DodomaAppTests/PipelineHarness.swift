@@ -282,6 +282,7 @@ final class PipelineHarness {
     private var hides = 0
     private var switches: [String] = []
     private var flipped: [Flip] = []
+    private var latest = BufferSnapshot()
     /// Fulfilled by the next flip that lands. See `awaitFlipCard`.
     private var flipWaiter: XCTestExpectation?
 
@@ -312,6 +313,7 @@ final class PipelineHarness {
         // Arabic installed.
         pipeline.layoutPair = { HarnessLayouts.pair }
 
+        pipeline.onChange = { [weak self] snapshot in self?.note(snapshot: snapshot) }
         pipeline.onSuggest = { [weak self] offer in self?.append(offer: offer.fix) }
         pipeline.onAutoApply = { [weak self] applied in self?.append(applied: applied) }
         pipeline.onRequestRejected = { [weak self] in self?.bumpRejections() }
@@ -479,6 +481,19 @@ final class PipelineHarness {
 
         test.wait(for: [waiting], timeout: timeout)
         return flips.first
+    }
+
+    /// The buffer as of the last snapshot the pipeline published.
+    var buffer: BufferSnapshot {
+        lock.lock()
+        defer { lock.unlock() }
+        return latest
+    }
+
+    private func note(snapshot: BufferSnapshot) {
+        lock.lock()
+        latest = snapshot
+        lock.unlock()
     }
 
     /// The layout switches the applies announced, in order.

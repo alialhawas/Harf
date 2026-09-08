@@ -12,6 +12,13 @@ import Foundation
 /// stands, the words in it are evidence about this person's vocabulary, and a
 /// word seen often enough is promoted to a real one. Manual entries skip the
 /// counting for the cases learning cannot reach.
+///
+/// Only the promoted and the hand-added ever reach disk. A word still counting
+/// has changed no score and is nothing but a record that this person typed it,
+/// so it lives in memory for as long as the app is running and no longer. The
+/// price is that ten sightings have to happen in one session; the alternative
+/// was a file of everything unusual anybody had typed near the app, written
+/// twenty seconds after the first sighting.
 public final class UserLexicon: @unchecked Sendable {
     /// Sightings before a word counts. High enough that a one-off wrong-layout
     /// run that slipped past the detector never reaches it.
@@ -219,7 +226,13 @@ public final class UserLexicon: @unchecked Sendable {
     public func save() -> Bool {
         lock.lock()
         guard dirty, let url else { lock.unlock(); return false }
-        let snapshot = stores
+        // Sub-threshold counts stay in memory. See the type's own header: what
+        // is written is what changes a score, never the tally on the way there.
+        let snapshot = stores.mapValues {
+            Store(
+                counts: $0.counts.filter { $0.value >= Self.promotionThreshold },
+                manual: $0.manual)
+        }
         dirty = false
         lock.unlock()
 

@@ -308,6 +308,21 @@ final class FlipFlowTests: XCTestCase {
         XCTAssertTrue(harness.engine.replaced.isEmpty)
     }
 
+    /// An application slower than the grace period looks exactly like one with
+    /// nothing highlighted, and the two must not collapse into one answer: the
+    /// second sends the flip to the typed run, which is a different span of the
+    /// document from the one the user was pointing at.
+    func testACopyThatWentUnansweredDoesNotFallBackToTheBuffer() {
+        harness.oracle.selectionAnswer = .unreadable
+        harness.engine.copyResult = .timedOut
+        harness.type(latin)
+        harness.flip()
+
+        XCTAssertTrue(harness.engine.applied.isEmpty, "the typed run is not flipped instead")
+        XCTAssertTrue(harness.engine.replaced.isEmpty)
+        XCTAssertEqual(harness.rejectionCount, 1)
+    }
+
     /// "The question could not be asked" is not "there is nothing selected".
     /// Falling back to the buffer here would rewrite a different span of the
     /// document from the one the user meant.

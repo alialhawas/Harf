@@ -200,7 +200,14 @@ final class TypingPipeline {
             // because that is where Text Input Sources calls belong and because
             // the undo slot cannot tell the fix's own switch from the user's
             // without it.
-            self?.inputSourceChanged(to: LayoutEngine.selectedLayoutID())
+            guard let self else { return }
+            let selected = LayoutEngine.selectedLayoutID()
+            // The cache resolves the pair against the selected source, and
+            // this is the only notification that says the selection moved.
+            // Without it a ⌃Space switch is invisible until the enabled
+            // sources change, which for most people is never.
+            self.layoutEngine.noteSelectedLayout(selected)
+            self.inputSourceChanged(to: selected)
         }
 
         let enabledSourcesName = Notification.Name(
@@ -374,7 +381,39 @@ final class TypingPipeline {
 
         case .suggestionDismiss:
             dismissSuggestion("the user pressed escape")
+
+        case .tapInterrupted(let reason):
+            tapInterrupted(reason: reason)
         }
+    }
+
+    /// Input reached the screen without reaching this queue. Queue-confined.
+    ///
+    /// Everything the app is willing to delete is counted backwards from the
+    /// caret against a buffer that claims to describe what is in front of it,
+    /// so the honest response to "some number of keystrokes are missing" is to
+    /// stop claiming anything: the buffer goes, the undo slot goes, and any
+    /// card on screen goes with them. Both serials move, because work already
+    /// in flight — a gate, a fix the injector has not started — was decided
+    /// against text that has since moved.
+    private func tapInterrupted(reason: String) {
+        dispatchPrecondition(condition: .onQueue(queue))
+
+        inputs.bump()
+        userInputs.bump()
+        // Not remembered as a refusal: the user did not turn the card down,
+        // they typed past it in a window this queue could not see.
+        dismissSuggestion("the tap missed input", remember: false)
+        // Explicitly rather than through `ResetReason.purgesHistory`: the
+        // keystroke log is still an honest record of what the tap did see, and
+        // only the undo has to go. Its backspaces are counted from the caret,
+        // and whatever the tap missed is now in front of it.
+        history.invalidate(.purged)
+        cancelTrigger()
+        guard !session.isBufferEmpty else { return }
+        Log.pipeline.error(
+            "typed buffer dropped: the tap missed input (\(reason, privacy: .public))")
+        resetBuffer(reason: .tapInterrupted)
     }
 
     /// Hops onto `queue` from wherever the caller is.
@@ -527,9 +566,14 @@ final class TypingPipeline {
     private func learnVocabulary(from detection: Detector.Detection, using detector: Detector) {
         guard settings.learnVocabulary else { return }
         guard case .ignore = detection.decision, detection.region == nil else { return }
+        // Not the whole buffer. With no candidate region there was no region to
+        // guard, so nothing here has been asked whether it reads as prose at
+        // all, and the run at the caret is still being typed. `learnableProse`
+        // is that question, asked of the finished part — without it a path, an
+        // identifier, or a passphrase at a prompt that did not raise secure
+        // input is counted as this person's vocabulary on first sighting.
+        guard let text = TextGuards.learnableProse(in: session.currentText) else { return }
         let model = detector.model(for: detection.typedLanguage)
-        let text = session.currentText
-        guard !text.isEmpty else { return }
         // Only words the shipped list does not already have.
         //
         // Counting everything meant the file filled with "the", "and" and
@@ -588,6 +632,11 @@ final class TypingPipeline {
         // the main thread after an invalidation, so the next quiet period will
         // have a warm cache. Skip this one rather than enumerate off-main.
         guard let pair = layoutEngine.cachedPair() else {
+            // Re-armed like the three abandon paths below it: nothing about
+            // this buffer was decided, and without another trigger a word
+            // typed across a sources change is never looked at again until the
+            // user types more.
+            if !session.isBufferEmpty { armTrigger() }
             return
         }
 
@@ -627,8 +676,12 @@ final class TypingPipeline {
             )
             return
         }
-        // The one interpolation in the project that is deliberately public:
-        // redacting it would make the opt-in flag pointless.
+        // The region is the user's own text, so it stays `.private` even here.
+        // The opt-in decides whether the line is emitted at all; it does not
+        // unredact it. Anyone reading the log sees `region=<private>` unless
+        // they have turned private-data logging on for the whole system, which
+        // is a deliberate act on the machine that produced the text and is the
+        // only way it is ever readable.
         Log.decision.info(
             "\(snapshot.verdict, privacy: .public) region=\(snapshot.regionText, privacy: .private) cur=\(snapshot.currentScore, format: .fixed(precision: 2), privacy: .public) alt=\(snapshot.alternateScore, format: .fixed(precision: 2), privacy: .public) guards=\(snapshot.guards, privacy: .public) reason=\(snapshot.reason, privacy: .public) in \(snapshot.durationMillis, format: .fixed(precision: 1), privacy: .public) ms"
         )
@@ -659,6 +712,19 @@ final class TypingPipeline {
     ) {
         dispatchPrecondition(condition: .onQueue(queue))
         guard !isGating, !isApplying else { return }
+
+        // Before the accessibility round trip, and before anything is offered:
+        // a fix whose span cannot be deleted by counting backspaces is one the
+        // injector will refuse anyway, and offering it would put a card in
+        // front of the user for a rewrite that can only end in a ✕.
+        if let fix = decision.fix,
+           let refusal = TextGuards.deleteRefusal(deleting: fix.deleteCount, of: fix.replacedText)
+        {
+            Log.fix.info(
+                "fix withheld: \(refusal.rawValue, privacy: .public) over \(fix.deleteCount, privacy: .public) clusters"
+            )
+            return
+        }
 
         isGating = true
         cancelTrigger()
@@ -981,11 +1047,23 @@ final class TypingPipeline {
     private func performUndo() {
         dispatchPrecondition(condition: .onQueue(queue))
 
-        guard history.undoableFix(now: Date()) != nil else {
+        guard let undoable = history.undoableFix(now: Date()) else {
             // ⌘⌥Z is a global chord, and most presses of it while there is
             // nothing to take back are meant for the application underneath.
             // Flashing at every one of them would be noise.
             Log.fix.debug("undo requested with nothing to undo")
+            return
+        }
+        // The undo deletes what the fix typed, so it is the *corrected* text
+        // the burst is counted against — a different span from the one the fix
+        // itself was checked for, and the one that carries whatever the
+        // alternate layout rendered.
+        let inverse = undoable.fix.inverted
+        if let refusal = TextGuards.deleteRefusal(
+            deleting: inverse.deleteCount, of: inverse.replacedText)
+        {
+            Log.fix.info("undo refused: \(refusal.rawValue, privacy: .public)")
+            onRequestRejected?()
             return
         }
         guard captureActive, !isSuppressed, !isApplying, !isGating else {
@@ -1285,6 +1363,15 @@ final class TypingPipeline {
                         pair: pair, security: security, bundleID: bundleID, pid: pid,
                         serial: serial)
 
+                case .timedOut:
+                    // The same reasoning as `couldNotTry`, one step further
+                    // out: the application was asked and did not answer, so
+                    // whether anything is highlighted is unknown rather than
+                    // known to be nothing.
+                    self.isGating = false
+                    Log.fix.info("flip refused: the selection went unanswered")
+                    self.onRequestRejected?()
+
                 case .couldNotTry(let error):
                     // "The question could not be asked" is not "there is
                     // nothing selected". Falling back to the typed run here
@@ -1346,13 +1433,19 @@ final class TypingPipeline {
             return
         }
 
-        // The typed-run path deletes cluster by cluster from the caret, and
-        // the buffer it counts those clusters from is capped. A longer run is
-        // one the buffer never held in full, so the delete burst would stop
-        // short and leave a hybrid of both layouts on screen.
-        if !overSelection, flip.original.count > TypedBuffer.maximumCapacity {
+        // The typed-run path is the only flip that deletes anything itself: it
+        // backspaces cluster by cluster from the caret, over a span inferred
+        // from a capped buffer rather than one the user highlighted. So it is
+        // held to the same rule as every other burst, and for the same reasons
+        // — a run longer than the cap is one the buffer never held in full, and
+        // the burst would stop short and leave a hybrid of both layouts on
+        // screen. A selection flip is exempt because it types over the
+        // selection and posts no backspaces at all.
+        if !overSelection,
+           let refusal = TextGuards.deleteRefusal(deleting: flip.original.count, of: flip.original)
+        {
             isGating = false
-            Log.fix.info("flip refused: the run is longer than the buffer can hold")
+            Log.fix.info("flip refused: \(refusal.rawValue, privacy: .public)")
             onRequestRejected?()
             return
         }

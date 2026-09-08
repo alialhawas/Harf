@@ -117,3 +117,81 @@ final class GuardTests: XCTestCase {
         XCTAssertTrue(result.blocksSuggest, "fired: \(result.summary)")
     }
 }
+
+// MARK: - What a delete burst may be counted against
+
+/// The rule the injector and the pipeline both apply before anything is
+/// deleted. It is the one place where "how many clusters" and "which text" are
+/// made to agree, and where a burst is given a length limit at all.
+extension GuardTests {
+    private func refusal(_ text: String, count: Int? = nil) -> DeleteRefusal? {
+        TextGuards.deleteRefusal(deleting: count ?? text.count, of: text)
+    }
+
+    func testOrdinaryTypedTextIsDeletable() {
+        XCTAssertNil(refusal("hkh hsmdih hgdml "))
+    }
+
+    /// The لا ligature is one scalar that no key types, and it is what the flip
+    /// path produces for ل followed by ا. Refusing it would break the flip on
+    /// the most common word shape in the language.
+    func testTheLamAlefLigatureIsDeletable() {
+        XCTAssertNil(refusal("\u{FEFB} "))
+    }
+
+    func testARunLongerThanTheCapIsRefused() {
+        let cap = TextGuards.maximumDeleteCount
+        XCTAssertNil(refusal(String(repeating: "a", count: cap)))
+        XCTAssertEqual(refusal(String(repeating: "a", count: cap + 1)), .tooLong)
+    }
+
+    /// `deleteCount == replacedText.count` is the `Fix` contract, asserted here
+    /// rather than trusted: the two are counted in different places, and a fix
+    /// where they disagree deletes a span nobody described.
+    func testACountThatDisagreesWithTheTextIsRefused() {
+        XCTAssertEqual(refusal("hgs", count: 4), .countMismatch)
+        XCTAssertEqual(refusal("hgs", count: 2), .countMismatch)
+    }
+
+    /// Applications disagree about whether one backspace removes the cluster,
+    /// the scalar or the UTF-16 unit, and the caret verification counts in
+    /// UTF-16 while `deleteCount` counts clusters. Where the three cannot agree,
+    /// nothing is deleted.
+    func testClustersThatAreNotOneBackspaceAreRefused() {
+        XCTAssertEqual(refusal("cafe\u{0301} "), .ambiguousCluster, "decomposed é")
+        XCTAssertEqual(refusal("\u{0645}\u{064E}\u{0646} "), .ambiguousCluster, "base + haraka")
+        XCTAssertEqual(
+            refusal("\u{1F468}\u{200D}\u{1F4BB} "), .ambiguousCluster, "a ZWJ emoji sequence")
+        XCTAssertEqual(refusal("\u{1F600} "), .ambiguousCluster, "a single non-BMP scalar")
+    }
+}
+
+// MARK: - What may be counted as this person's vocabulary
+
+extension GuardTests {
+    func testTheRunAtTheCaretIsNotLearnedFromYet() {
+        XCTAssertNil(TextGuards.learnableProse(in: "endpoint"))
+        XCTAssertEqual(TextGuards.learnableProse(in: "we shipped the endpoint"), "we shipped the")
+    }
+
+    func testProseIsLearnedFrom() {
+        XCTAssertEqual(
+            TextGuards.learnableProse(in: "we should merge the branch "),
+            "we should merge the branch")
+    }
+
+    /// The shapes a passphrase, a path or an identifier take. None of them was
+    /// ever guarded — a detection with no candidate region never ran the guards
+    /// at all — so this is where they are asked.
+    func testTextThatIsNotProseTeachesNothing() {
+        XCTAssertNil(TextGuards.learnableProse(in: "Tr0ub4dor&3 "))
+        XCTAssertNil(TextGuards.learnableProse(in: "cat /usr/local/bin/swift "))
+        XCTAssertNil(TextGuards.learnableProse(in: "let requestHandler = 1 "))
+        XCTAssertNil(TextGuards.learnableProse(in: "hunter2 "), "a lone token, and digits in it")
+    }
+
+    func testAnEmptyOrWhitespaceRunTeachesNothing() {
+        XCTAssertNil(TextGuards.learnableProse(in: ""))
+        XCTAssertNil(TextGuards.learnableProse(in: "   "))
+    }
+}

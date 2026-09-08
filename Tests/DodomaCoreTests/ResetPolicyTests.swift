@@ -114,6 +114,19 @@ final class ResetPolicyTests: XCTestCase {
     func testOnlySecureInputPurgesTheKeystrokeHistory() {
         let purging = ResetReason.allCases.filter(\.purgesHistory)
         XCTAssertEqual(purging, [.secureInput])
-        XCTAssertEqual(ResetReason.allCases.count, 13, "a new reason needs a purge decision")
+        XCTAssertEqual(ResetReason.allCases.count, 14, "a new reason needs a purge decision")
+    }
+
+    /// The decision made for the newest reason, written down where the count
+    /// above sends the next reader.
+    ///
+    /// A tap interruption says keystrokes reached the screen without reaching
+    /// the buffer. That makes the buffer's claim about what is in front of the
+    /// caret false — so the buffer goes, and the pipeline gives up the undo slot
+    /// with it — but it says nothing about the fifty keys the tap *did* see, and
+    /// those are exactly what somebody opening the debug window after a missed
+    /// burst is looking for.
+    func testATapInterruptionKeepsTheKeystrokeHistory() {
+        XCTAssertFalse(ResetReason.tapInterrupted.purgesHistory)
     }
 }
