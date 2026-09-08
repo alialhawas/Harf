@@ -39,6 +39,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var flipController: FlipController?
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
+        // The first thing written anywhere by a copy that is going to keep
+        // running. The single-copy check is already behind us — `main.swift`
+        // runs it before this object is constructed, because constructing it
+        // touches `SettingsStore.shared`, which writes to the settings suite
+        // the running copy shares — so a copy that stood down never logs a
+        // start it did not make.
         Log.app.info("Harf \(DodomaCore.Dodoma.version, privacy: .public) starting")
 
         preloadLanguageModels()

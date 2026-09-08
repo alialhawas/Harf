@@ -65,6 +65,11 @@ enum LoginItem {
     static let settingsURL = URL(
         string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")!
 
+    /// `SMAppService.mainApp` asks launchd about `Bundle.main`, so the guard
+    /// has to be the same question: not "is there a Harf bundle somewhere" but
+    /// "is *this process* running as one". Asking from outside a bundle does
+    /// not raise, which would at least be loud — it answers `.notFound`, which
+    /// reads as "your registration is broken" and is worse than saying nothing.
     static var status: LoginItemStatus {
         guard isBundled else { return .unavailable }
         return map(SMAppService.mainApp.status)
@@ -108,10 +113,62 @@ enum LoginItem {
         NSWorkspace.shared.open(settingsURL)
     }
 
-    /// `swift run` produces a bare executable with no bundle identifier, and
-    /// `SMAppService.mainApp` on one of those raises rather than returning a
-    /// status.
-    private static var isBundled: Bool {
+    /// Whether this process is running as an application bundle.
+    ///
+    /// `swift run` produces a bare executable with no bundle identifier, and so
+    /// — less obviously — does the `harf` the Homebrew cask puts on the PATH:
+    /// that is a symlink *into* the bundle, and a process started through it
+    /// has `Bundle.main` pointing at `/opt/homebrew/bin`. Both are the command
+    /// line, and neither is a login item.
+    ///
+    /// Also the launch signal for the whole process — see `CLI.launch` — which
+    /// is why it is shared rather than asked twice.
+    static var isBundled: Bool {
         Bundle.main.bundleIdentifier != nil
+    }
+
+    /// The identifier of the app bundle this executable belongs to, found even
+    /// when the process was not started as that bundle.
+    ///
+    /// `harf --status` run through the cask's symlink is not a bundled process,
+    /// so it cannot ask launchd anything and reports start-at-login as
+    /// unavailable — to a user who is running the bundled copy and has it
+    /// switched on. Nothing public lets one process ask about another bundle's
+    /// registration, so the honest repair is to stop implying the user has no
+    /// bundle: resolve the executable, find the `.app` it lives in, and say
+    /// which copy the answer is missing *for*.
+    static var owningBundleIdentifier: String? {
+        Bundle.main.bundleIdentifier
+            ?? Bundle.main.executableURL.flatMap {
+                bundleIdentifier(forExecutableAt: $0.resolvingSymlinksInPath())
+            }
+    }
+
+    /// Walks up from an executable to the nearest enclosing `.app` and reads
+    /// its `CFBundleIdentifier`. Nil when there is no `.app` above it, or when
+    /// the bundle has no identifier.
+    ///
+    /// Pure enough to point at a directory a test made, which is the only
+    /// reason it takes a path rather than reading `Bundle.main` itself: the
+    /// case it exists for cannot be reproduced inside a test process, but the
+    /// path arithmetic can, and the path arithmetic is where it would break.
+    ///
+    /// `Bundle(url:)` rather than parsing the plist by hand — it is the same
+    /// lookup the loader does, including the placement rules for `Info.plist`,
+    /// and it returns nil rather than guessing when the directory is not
+    /// really a bundle.
+    static func bundleIdentifier(forExecutableAt url: URL) -> String? {
+        var directory = url.deletingLastPathComponent()
+        while directory.path != "/" {
+            if directory.pathExtension == "app" {
+                return Bundle(url: directory)?.bundleIdentifier
+            }
+            let parent = directory.deletingLastPathComponent()
+            // `deletingLastPathComponent` on a relative path or a root-like URL
+            // can stand still; without this the walk would never end.
+            guard parent.path != directory.path else { return nil }
+            directory = parent
+        }
+        return nil
     }
 }

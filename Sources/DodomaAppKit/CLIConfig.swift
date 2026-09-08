@@ -26,7 +26,9 @@ enum CLIConfig {
         print("  accessibility    \(mark(permissions.accessibility))")
         print("  input monitoring \(mark(permissions.inputMonitoring))")
         print("")
-        print("  launch at login  \(label(LoginItem.status))")
+        print(
+            "  launch at login  "
+                + label(LoginItem.status, owningBundleIdentifier: LoginItem.owningBundleIdentifier))
         print("  shortcuts        \(SettingsCopy.undoChord) undo, "
             + "\(SettingsCopy.pauseChord) pause, \(SettingsCopy.flipChord) flip")
         print("")
@@ -71,13 +73,29 @@ enum CLIConfig {
 
     /// A word for the login-item state. `explanation` is a paragraph meant for
     /// a settings pane; a status line needs the state itself.
-    private static func label(_ status: LoginItemStatus) -> String {
+    ///
+    /// - Parameter owningBundleIdentifier: the bundle this executable belongs
+    ///   to, when the process itself is not running as one.
+    ///
+    ///   `harf` on the PATH is a symlink into `Harf.app`, and a process started
+    ///   through it has no bundle identifier, so launchd will not answer for it
+    ///   — while the user asking is running the bundled copy and may well have
+    ///   start-at-login switched on. "Not running from a bundled app" is then
+    ///   true of the command and false of everything the reader means by it.
+    ///   Nothing lets one process ask launchd about another bundle, so the line
+    ///   says which copy it cannot answer for and where the answer is.
+    static func label(_ status: LoginItemStatus, owningBundleIdentifier: String? = nil) -> String {
         switch status {
         case .enabled: return "yes"
         case .disabled: return "no"
         case .requiresApproval: return "waiting for approval in System Settings"
         case .notFound: return "registered copy missing — switch it off and on again"
-        case .unavailable: return "unavailable (not running from a bundled app)"
+        case .unavailable:
+            guard let owningBundleIdentifier else {
+                return "unavailable (not running from a bundled app)"
+            }
+            return "not readable from here — this is the command line, not \(owningBundleIdentifier)"
+                + "; see System Settings > General > Login Items"
         }
     }
 
@@ -275,10 +293,19 @@ enum CLIConfig {
 
     // MARK: - Helpers
 
-    private static var isRunning: Bool {
-        !NSWorkspace.shared.runningApplications
-            .filter { $0.bundleIdentifier == "com.ali.dodoma" }.isEmpty
-    }
+    /// Whether a copy is running, by the same test the copy itself used to
+    /// decide it was allowed to.
+    ///
+    /// The identifier lookup this replaces answered "no" for a copy started
+    /// from a shell — LaunchServices records those with no bundle identifier at
+    /// all — which is the one copy `--status` most needs to report, because it
+    /// is the one the single-instance alert tells the user to go and quit. Two
+    /// answers to one question is worse than either answer alone.
+    ///
+    /// A lookup on the bootstrap name, never a registration: see
+    /// `SingleInstance.isHeld`. `--status` must not become the second instance
+    /// it is reporting on.
+    private static var isRunning: Bool { SingleInstance.isHeld() }
 
     private static func mark(_ on: Bool) -> String { on ? "yes" : "no" }
     private static func pct(_ score: Double) -> String { "\(Int((score * 100).rounded()))%" }
