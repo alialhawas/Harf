@@ -5,6 +5,7 @@ import Foundation
 public enum HotkeyAction: String, Equatable, Sendable, CaseIterable {
     case undoLastFix
     case togglePause
+    case flipSelection
 }
 
 /// One chord, in the two vocabularies that have to agree about it: the app's own
@@ -53,7 +54,7 @@ public struct HotkeyBinding: Equatable, Sendable {
 }
 
 /// The bindings, in one place. Rebinding is not supported — the settings
-/// window shows the two chords read-only and says so. When it is, it replaces
+/// window shows the chords read-only and says so. When it is, it replaces
 /// this table and nothing else.
 public enum Hotkeys {
     /// ⌘⌥Z. Key code 6 is Z on every layout.
@@ -64,7 +65,11 @@ public enum Hotkeys {
     public static let togglePause = HotkeyBinding(
         action: .togglePause, keycode: 35, modifiers: [.command, .option])
 
-    public static let all: [HotkeyBinding] = [undoLastFix, togglePause]
+    /// ⌃⌘F. Key code 3 is F on every layout.
+    public static let flipSelection = HotkeyBinding(
+        action: .flipSelection, keycode: 3, modifiers: [.control, .command])
+
+    public static let all: [HotkeyBinding] = [undoLastFix, togglePause, flipSelection]
 
     /// The action a captured keystroke asks for, or nil when it is ordinary
     /// typing. Called on the event tap thread, once per keystroke.

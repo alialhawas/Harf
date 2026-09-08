@@ -674,11 +674,13 @@ private struct AdvancedTab: View {
                 }
                 GridRow {
                     Text("Shortcuts").foregroundStyle(.secondary)
-                    Text("\(SettingsCopy.undoChord) / \(SettingsCopy.pauseChord)")
+                    Text(
+                        "\(SettingsCopy.undoChord) / \(SettingsCopy.pauseChord) "
+                            + "/ \(SettingsCopy.flipChord)")
                 }
                 GridRow {
                     Text("").foregroundStyle(.secondary)
-                    Text("undo / pause — rebinding not yet supported")
+                    Text("undo / pause / flip — rebinding not yet supported")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -824,4 +826,5 @@ enum SettingsCopy {
     /// compare against the menu, so they match the menu.
     static let undoChord = "⌥⌘Z"
     static let pauseChord = "⌥⌘P"
+    static let flipChord = "⌃⌘F"
 }

@@ -34,6 +34,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private let statusLineItem: NSMenuItem
     private let lastFixItem: NSMenuItem
     private let undoItem: NSMenuItem
+    private let flipItem: NSMenuItem
     private let pauseItem: NSMenuItem
     private let modeItem: NSMenuItem
     private var modeOptions: [AppPolicy: NSMenuItem] = [:]
@@ -49,6 +50,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     static let undoKeyEquivalent = "z"
     static var undoModifiers: NSEvent.ModifierFlags {
         modifierFlags(Hotkeys.undoLastFix.modifiers)
+    }
+
+    /// The same pairing for `Hotkeys.flipSelection`. Key code 3 is F.
+    static let flipKeyEquivalent = "f"
+    static var flipModifiers: NSEvent.ModifierFlags {
+        modifierFlags(Hotkeys.flipSelection.modifiers)
     }
 
     static func modifierFlags(_ flags: KeyFlags) -> NSEvent.ModifierFlags {
@@ -74,6 +81,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     /// to undo *right now*? It expires on a timer as well as on events, so it
     /// cannot be a value pushed here after the fact.
     var isUndoAvailable: (() -> Bool)?
+    /// Invoked when the user picks "Flip Selection".
+    var onFlip: (() -> Void)?
+    /// Asked, on the main thread, while the menu is opening, for the same
+    /// reason `isUndoAvailable` is: the pipeline can be busy or suspended by
+    /// the time the menu opens, and an item that answers with a ✕ is worse
+    /// than a greyed-out one.
+    var isFlipAvailable: (() -> Bool)?
 
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -99,6 +113,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             keyEquivalent: Self.undoKeyEquivalent)
         undoItem.keyEquivalentModifierMask = Self.undoModifiers
         undoItem.isEnabled = false
+        // The key equivalent is decoration here too: Carbon dispatches ⌃⌘F,
+        // and setting it renders the chord beside the title.
+        flipItem = NSMenuItem(
+            title: "Flip Selection", action: nil,
+            keyEquivalent: Self.flipKeyEquivalent)
+        flipItem.keyEquivalentModifierMask = Self.flipModifiers
+        flipItem.isEnabled = false
         pauseItem = NSMenuItem(title: "Pause Harf", action: nil, keyEquivalent: "")
         modeItem = NSMenuItem(title: "Mode", action: nil, keyEquivalent: "")
 
@@ -150,6 +171,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     func clearUndoShortcut() {
         undoItem.keyEquivalent = ""
         undoItem.keyEquivalentModifierMask = []
+    }
+
+    /// The same, for ⌃⌘F. Main thread only.
+    func clearFlipShortcut() {
+        flipItem.keyEquivalent = ""
+        flipItem.keyEquivalentModifierMask = []
     }
 
     /// Main thread only.
@@ -226,6 +253,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         undoItem.target = self
         undoItem.action = #selector(undoLastFix)
         menu.addItem(undoItem)
+
+        flipItem.target = self
+        flipItem.action = #selector(flipSelection)
+        menu.addItem(flipItem)
 
         menu.addItem(.separator())
 
@@ -326,6 +357,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         // timer, so a value published when the fix landed would be a lie by the
         // time the user opens the menu.
         undoItem.isEnabled = isUndoAvailable?() ?? false
+        flipItem.isEnabled = isFlipAvailable?() ?? false
     }
 
     // MARK: - Actions
@@ -341,6 +373,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     @objc private func undoLastFix() {
         onUndo?()
+    }
+
+    @objc private func flipSelection() {
+        onFlip?()
     }
 
     @objc private func selectMode(_ sender: NSMenuItem) {

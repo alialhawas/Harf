@@ -28,6 +28,11 @@ public enum CLI {
     static let helpText = """
         harf — fixes text typed with the wrong keyboard layout
 
+        Shortcuts
+          ⌃⌘F   flip the selection, or the last thing you typed, to the other layout
+          ⌥⌘Z   put the last fix back, for 30 seconds
+          ⌥⌘P   pause and resume
+
         Configuration
           --status                     every setting, permission and list, in full
           --config                     the same thing as JSON, for scripts and diffs

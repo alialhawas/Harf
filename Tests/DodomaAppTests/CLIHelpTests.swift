@@ -49,6 +49,17 @@ final class CLIHelpTests: XCTestCase {
         }
     }
 
+    /// The chords are hand-written in three places — the menu, the settings
+    /// window and this text — and a chord missing from --help is a feature
+    /// only somebody who opened the menu can find.
+    func testHelpNamesEveryShortcut() {
+        for chord in [SettingsCopy.undoChord, SettingsCopy.pauseChord, SettingsCopy.flipChord] {
+            XCTAssertTrue(
+                CLI.helpText.contains(chord),
+                "\(chord) is a registered shortcut but --help never mentions it")
+        }
+    }
+
     /// The message someone sees after a typo has to name every key, or it sends
     /// them looking for a setting they already have.
     func testTheUnknownKeyErrorNamesEverySettableKey() {

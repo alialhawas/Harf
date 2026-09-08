@@ -71,13 +71,19 @@ final class SettingsCopyTests: XCTestCase {
     func testTheDisplayedChordsMatchTheRegisteredHotkeys() {
         XCTAssertEqual(SettingsCopy.undoChord, Self.chord(Hotkeys.undoLastFix, letter: "Z"))
         XCTAssertEqual(SettingsCopy.pauseChord, Self.chord(Hotkeys.togglePause, letter: "P"))
-        // Key code 6 is Z and 35 is P on every layout; the letters above are
-        // the only part of the rendering that cannot be derived.
+        XCTAssertEqual(SettingsCopy.flipChord, Self.chord(Hotkeys.flipSelection, letter: "F"))
+        // Key code 6 is Z, 35 is P and 3 is F on every layout; the letters
+        // above are the only part of the rendering that cannot be derived.
         XCTAssertEqual(Hotkeys.undoLastFix.keycode, 6)
         XCTAssertEqual(Hotkeys.togglePause.keycode, 35)
+        XCTAssertEqual(Hotkeys.flipSelection.keycode, 3)
         XCTAssertEqual(
             String(SettingsCopy.undoChord.suffix(1)),
             MenuBarController.undoKeyEquivalent.uppercased(),
+            "the menu item and the settings window name the same key")
+        XCTAssertEqual(
+            String(SettingsCopy.flipChord.suffix(1)),
+            MenuBarController.flipKeyEquivalent.uppercased(),
             "the menu item and the settings window name the same key")
     }
 

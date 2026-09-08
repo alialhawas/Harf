@@ -28,7 +28,7 @@ enum CLIConfig {
         print("")
         print("  launch at login  \(label(LoginItem.status))")
         print("  shortcuts        \(SettingsCopy.undoChord) undo, "
-            + "\(SettingsCopy.pauseChord) pause")
+            + "\(SettingsCopy.pauseChord) pause, \(SettingsCopy.flipChord) flip")
         print("")
         print("  paused           \(mark(s.paused))")
         print("  sensitivity      \(s.aggressiveness.rawValue)")
