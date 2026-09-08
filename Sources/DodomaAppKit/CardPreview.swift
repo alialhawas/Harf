@@ -2,14 +2,14 @@ import AppKit
 import DodomaCore
 import SwiftUI
 
-/// Shows the two floating cards in an ordinary window, replaying their
-/// entrances on a loop.
+/// Shows the floating cards in an ordinary window, replaying their entrances
+/// on a loop.
 ///
-/// Both cards are otherwise only reachable by reproducing the conditions that
-/// raise them — typing a specific phrase in a specific layout, or getting a
-/// word to its tenth sighting — which is a poor way to look at an animation
-/// you are trying to get right. Same views, same modifiers, same timings as
-/// the real thing; only the window is different.
+/// Every one of them is otherwise only reachable by reproducing the conditions
+/// that raises it — typing a specific phrase in a specific layout, getting a
+/// word to its tenth sighting, or asking for a flip — which is a poor way to
+/// look at an animation you are trying to get right. Same views, same
+/// modifiers, same timings as the real thing; only the window is different.
 ///
 /// A development affordance, in the same spirit as `--dump-layout-fixtures`.
 public enum CardPreview {
@@ -45,7 +45,7 @@ private final class PreviewDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 320),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 420),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false)
@@ -95,6 +95,10 @@ private struct PreviewStage: View {
             label("Learned a word — Arabic")
             LearnedCard(words: ["تفعيل"], rightToLeft: true, onUndo: {})
                 .id("learned-ar-\(take)")
+
+            label("Flipped")
+            FlipCard(text: "السلام عليكم", rightToLeft: true, onLearn: {}, onDismiss: {})
+                .id("flip-\(take)")
 
             Spacer()
         }
