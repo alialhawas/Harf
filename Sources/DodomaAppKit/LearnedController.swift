@@ -17,14 +17,19 @@ final class LearnedController {
     static let fadeDuration: TimeInterval = 0.12
 
     private let oracle: FocusOracle
+    /// Where the card is, so the pipeline can tell a press of the card's Undo
+    /// button from a click in the application underneath. Without it the click
+    /// ends the undo window on its way to the button that was going to use it.
+    private let cards: CardFrames
     private var panel: SuggestionPanel?
     private var hosting: NSHostingView<LearnedCard>?
     private var dismissTimer: Timer?
     /// Guards against a caret lookup answering after its card was superseded.
     private var generation = 0
 
-    init(oracle: FocusOracle) {
+    init(oracle: FocusOracle, cards: CardFrames) {
         self.oracle = oracle
+        self.cards = cards
     }
 
     func show(words: [String], language: Language, pid: pid_t?, onUndo: @escaping () -> Void) {
@@ -52,6 +57,10 @@ final class LearnedController {
     }
 
     func dismiss() {
+        // First, before the fade: the fade sets `ignoresMouseEvents`, so from
+        // this moment a click over the card really does reach the application
+        // underneath and really is input.
+        cards.hide(.learned)
         generation += 1
         let generation = self.generation
         dismissTimer?.invalidate()
@@ -66,6 +75,7 @@ final class LearnedController {
             },
             completionHandler: { [weak self] in
                 guard let self, self.generation == generation else { return }
+                cards.hide(.learned)
                 panel.orderOut(nil)
             })
     }
@@ -93,6 +103,10 @@ final class LearnedController {
             rtl: rightToLeft, quality: anchor.quality)
 
         panel.setFrame(frame, display: false)
+        cards.show(
+            .learned,
+            displayFrame: ScreenCoordinates.displayRect(
+                fromAppKit: frame, primaryScreenMaxY: geometry.primaryMaxY))
         panel.invalidateShadow()
         panel.alphaValue = 0
         panel.ignoresMouseEvents = false

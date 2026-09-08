@@ -48,3 +48,74 @@ final class FocusOracleTests: XCTestCase {
         XCTAssertEqual(FocusOracle.withoutFocusedElement(trusted: true).security, .unknown)
     }
 }
+
+/// The selection read's mapping from what accessibility answered to what it
+/// means.
+///
+/// Only the mapping. Everything around it is AX-bound — a live grant, a focused
+/// application, a real highlighted range — and has no seam underneath to fake,
+/// which is why the reasoning was split out as a pure function in the first
+/// place.
+final class SelectionReadTests: XCTestCase {
+    private func read(
+        trusted: Bool = true,
+        security: SecureFieldState = .notSecure,
+        hasFocusedElement: Bool = true,
+        selectedRangeLength: Int? = nil,
+        hasValue: Bool = true,
+        selectedText: String? = nil
+    ) -> SelectionRead {
+        FocusOracle.selectionRead(
+            trusted: trusted, security: security, hasFocusedElement: hasFocusedElement,
+            selectedRangeLength: selectedRangeLength, hasValue: hasValue,
+            selectedText: selectedText)
+    }
+
+    func testANonEmptyRangeWithTextIsASelection() {
+        XCTAssertEqual(
+            read(selectedRangeLength: 6, selectedText: "hgsghl"), .selected("hgsghl"))
+    }
+
+    func testAnEmptyRangeIsACaretWithNothingSelected() {
+        XCTAssertEqual(read(selectedRangeLength: 0), .noSelection)
+    }
+
+    /// A terminal drawing its own cells: no focused element at all, with the
+    /// grant in hand. Silence, and the caller falls back to the typed buffer.
+    func testAnAppWithNoAccessibilityTreeIsStructurallySilent() {
+        XCTAssertEqual(read(hasFocusedElement: false), .unreadable)
+    }
+
+    /// The same nil without the grant says only that Harf is blind.
+    func testWithoutTheGrantTheSameSilenceIsUnavailable() {
+        XCTAssertEqual(read(trusted: false, hasFocusedElement: false), .unavailable)
+    }
+
+    /// Neither a selected range nor a value is the same structural silence one
+    /// level down: not a text field anybody can reason about.
+    func testAnElementWithNeitherRangeNorValueIsUnreadable() {
+        XCTAssertEqual(read(selectedRangeLength: nil, hasValue: false), .unreadable)
+    }
+
+    /// A value but no range is the noisy failure: it has text and will not say
+    /// what is selected in it.
+    func testAnElementWithAValueButNoRangeIsARefusal() {
+        XCTAssertEqual(read(selectedRangeLength: nil, hasValue: true), .unavailable)
+    }
+
+    /// It claimed a selection and then would not hand it over. Flipping a
+    /// selection whose contents are unknown would overwrite it with a guess.
+    func testARangeThatYieldsNoTextIsARefusal() {
+        XCTAssertEqual(read(selectedRangeLength: 6, selectedText: nil), .unavailable)
+        XCTAssertEqual(read(selectedRangeLength: 6, selectedText: ""), .unavailable)
+    }
+
+    /// Reading a password field's selection is itself the leak, so the answer
+    /// is the same one a refusal gets, whatever the range said.
+    func testASecureFieldIsNeverRead() {
+        XCTAssertEqual(
+            read(security: .secure, selectedRangeLength: 6, selectedText: "hunter2"),
+            .unavailable)
+        XCTAssertEqual(read(security: .secure, selectedRangeLength: 0), .unavailable)
+    }
+}

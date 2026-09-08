@@ -87,6 +87,9 @@ final class TypingPipeline {
     private let focus: FocusInspecting
     /// Written by the panel controller, read here and on the tap thread.
     private let suggestionState: SuggestionState
+    /// The rectangles of Harf's own cards, so a click on one is not counted as
+    /// input. Written by the card controllers on the main thread, read here.
+    private let cardFrames: CardFrames
 
     /// Queue-confined state.
     private var pendingEvaluation: DispatchWorkItem?
@@ -154,6 +157,7 @@ final class TypingPipeline {
         frontmost: FrontmostAppTracker,
         secureInput: SecureInputReading,
         suggestionState: SuggestionState,
+        cardFrames: CardFrames,
         lexicon: UserLexicon? = nil,
         fixEngine: FixApplying? = nil,
         focus: FocusInspecting? = nil
@@ -163,6 +167,7 @@ final class TypingPipeline {
         self.frontmost = frontmost
         self.secureInput = secureInput
         self.suggestionState = suggestionState
+        self.cardFrames = cardFrames
         self.paused = settings.paused
         self.secureInputActive = secureInput.isEnabled
         frontmostPolicy = settings.policy(for: frontmost.bundleID)
@@ -328,6 +333,16 @@ final class TypingPipeline {
             process(.key(key))
 
         case .mouseDown(let location, let primaryButton):
+            // A click on one of Harf's own cards is not input. The ordinary
+            // mouse-down path bumps the input serial and ends the undo window,
+            // so routing a press of the learned card's Undo button through it
+            // would throw away the ⌘⌥Z slot that button exists to use. The
+            // card's own handler still gets the click through its panel.
+            //
+            // The suggestion card is not in here on purpose: its clicks must
+            // reach `mouseDisposition` below, which turns one into an accept.
+            if cardFrames.contains(location) { return }
+
             // A click on the card is the second way to accept, and it must not
             // be treated as input first: the ordinary mouse-down path bumps the
             // input serial, which would make the acceptance it is *part of*

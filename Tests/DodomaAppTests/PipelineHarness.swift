@@ -149,11 +149,40 @@ final class FakeFocusOracle: FocusInspecting {
     private var answer = FocusInspection(security: .notSecure, caretRead: .unavailable)
     private var lengths: [Int?] = []
     private var invalidations = 0
+    private var selection: SelectionRead = .noSelection
+    private var selectionCalls = 0
 
     /// Run on the pipeline queue, just before the answer is handed back. The
     /// only way to reproduce a keystroke landing *during* the round trip, which
     /// is the race the input serial exists for.
     var beforeAnswering: (() -> Void)?
+
+    /// The counterpart of `beforeAnswering` for the selection read, and there
+    /// for the same reason: a real ⌘C round trip is the better part of a
+    /// second, and anything the user does inside it has to be reproducible.
+    var beforeSelectionAnswer: (() -> Void)?
+
+    /// What the next `selectedText` reports back. Defaults to the answer a
+    /// field with a caret and nothing highlighted gives.
+    var selectionAnswer: SelectionRead {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return selection
+        }
+        set {
+            lock.lock()
+            selection = newValue
+            lock.unlock()
+        }
+    }
+
+    /// How many times the pipeline asked what was selected.
+    var selectionRequests: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return selectionCalls
+    }
 
     func answer(_ inspection: FocusInspection) {
         lock.lock()
@@ -186,6 +215,15 @@ final class FakeFocusOracle: FocusInspecting {
         let answer = self.answer
         lock.unlock()
         beforeAnswering?()
+        completion(answer)
+    }
+
+    func selectedText(pid: pid_t?, completion: @escaping (SelectionRead) -> Void) {
+        lock.lock()
+        selectionCalls += 1
+        let answer = selection
+        lock.unlock()
+        beforeSelectionAnswer?()
         completion(answer)
     }
 
@@ -230,6 +268,7 @@ final class PipelineHarness {
     let oracle = FakeFocusOracle()
     let secureInput = FakeSecureInput()
     let suggestionState = SuggestionState()
+    let cardFrames = CardFrames()
     let frontmost = FrontmostAppTracker()
     let settings: SettingsStore
     let pipeline: TypingPipeline
@@ -260,6 +299,7 @@ final class PipelineHarness {
             frontmost: frontmost,
             secureInput: secureInput,
             suggestionState: suggestionState,
+            cardFrames: cardFrames,
             fixEngine: engine,
             focus: oracle)
 
@@ -323,8 +363,10 @@ final class PipelineHarness {
             timestamp: Date().timeIntervalSinceReferenceDate)))
     }
 
-    func click() {
-        send(.mouseDown(at: .zero, primaryButton: true))
+    /// - Parameter location: in display coordinates, the way `CGEvent` reports
+    ///   a click and the way both card registries store their rectangles.
+    func click(at location: CGPoint = .zero) {
+        send(.mouseDown(at: location, primaryButton: true))
     }
 
     /// The user picking a layout out of the menu bar, as the pipeline's own

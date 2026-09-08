@@ -28,6 +28,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The one piece of state the event tap thread, the pipeline queue and the
     /// main thread all touch. Created here so no one of the three owns it.
     private let suggestionState = SuggestionState()
+    /// The rectangles of the cards whose clicks are not input. One registry,
+    /// because a second would be a second set of rectangles that can disagree
+    /// with the first about where a card is.
+    private let cardFrames = CardFrames()
     /// Owned here, not by the pipeline, because the settings window reads and
     /// edits the same words and both must see one file.
     private let lexicon = UserLexicon(url: UserLexicon.defaultURL())
@@ -63,7 +67,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let pipeline = TypingPipeline(
             settings: settings, frontmost: frontmost, secureInput: secureInput,
-            suggestionState: suggestionState, lexicon: lexicon)
+            suggestionState: suggestionState, cardFrames: cardFrames, lexicon: lexicon)
 
         // The panel borrows the pipeline's accessibility oracle rather than
         // making a second one: the caret lookup and the security check have to
@@ -77,7 +81,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Shares the pipeline's oracle for the same reason the suggestion panel
         // does: one serial queue for every accessibility call.
-        let learned = LearnedController(oracle: pipeline.focusOracle)
+        let learned = LearnedController(oracle: pipeline.focusOracle, cards: cardFrames)
         learnedController = learned
         pipeline.onWordsLearned = { [weak self, weak learned] words, language, pid in
             guard let self else { return }
