@@ -16,8 +16,8 @@ real typeface, so switching the face is a parameter rather than a redraw. Pass
 
   docs/brand/harf-icon.svg              1024 master for the .icns
   docs/brand/harf-menubar.svg           18pt template glyph, documentation copy
-  docs/brand/harf-lockup-dark.svg       lockup on the dark ground
-  docs/brand/harf-lockup-light.svg      lockup on the light ground
+  docs/brand/harf-lockup-dark.svg       lockup for dark pages, transparent
+  docs/brand/harf-lockup-light.svg      lockup for light pages, transparent
   Sources/DodomaAppKit/MenuBarGlyph.swift   the same glyph as drawing code
 
 LICENCE — READ BEFORE ADDING A FONT TO THE REPOSITORY.
@@ -66,6 +66,12 @@ TEAL = "#5BC2AB"
 DEEP = "#387A6C"
 PAPER = "#F3F7F5"
 INK = "#10161A"
+# The tile's edge in the dark lockup, which has no ground of its own to sit
+# against. Faint enough to disappear on the icon's usual near-black, strong
+# enough to keep the tile from dissolving into a page that is darker still.
+TILE_EDGE = "#FFFFFF"
+TILE_EDGE_OPACITY = "0.12"
+TILE_EDGE_WIDTH = 1.0
 
 # Apple's macOS icon grid: an 824pt rounded square with a 185pt corner radius,
 # centred in a 1024pt canvas. Matching it is what makes the icon sit at the
@@ -410,19 +416,36 @@ GLOW_DEF = ('<radialGradient id="harf-glow" cx="50%" cy="48%" r="52%">'
             '</radialGradient>')
 
 
-def tile_markup(x: float, y: float, side: float) -> str:
+def rect_geometry(x: float, y: float, side: float, radius: float) -> str:
+    return (f'x="{number(x)}" y="{number(y)}" width="{number(side)}" '
+            f'height="{number(side)}" rx="{number(radius)}" '
+            f'ry="{number(radius)}"')
+
+
+def tile_markup(x: float, y: float, side: float, hairline: bool = False) -> str:
     """The rounded tile: canvas, then the glow painted over it.
 
     The glow goes on a second copy of the rounded rectangle rather than into a
     `<clipPath>`; the rectangle clips it either way, and this is one fewer SVG
     feature for a rasteriser to not implement.
+
+    `hairline` adds a faint light edge, for the lockup that will be placed on
+    a dark page whose exact colour is not ours to choose. It is drawn on a
+    copy inset by half its own width so that the stroke falls entirely inside
+    the tile and the artwork's bounding box is still the tile.
     """
     radius = TILE_RADIUS / TILE[2] * side
-    geometry = (f'x="{number(x)}" y="{number(y)}" width="{number(side)}" '
-                f'height="{number(side)}" rx="{number(radius)}" '
-                f'ry="{number(radius)}"')
-    return (f'<rect {geometry} fill="{CANVAS}"/>'
-            f'<rect {geometry} fill="url(#harf-glow)"/>')
+    geometry = rect_geometry(x, y, side, radius)
+    markup = (f'<rect {geometry} fill="{CANVAS}"/>'
+              f'<rect {geometry} fill="url(#harf-glow)"/>')
+    if hairline:
+        inset = TILE_EDGE_WIDTH / 2.0
+        edge = rect_geometry(x + inset, y + inset, side - TILE_EDGE_WIDTH,
+                             max(radius - inset, 0.0))
+        markup += (f'<rect {edge} fill="none" stroke="{TILE_EDGE}" '
+                   f'stroke-opacity="{TILE_EDGE_OPACITY}" '
+                   f'stroke-width="{number(TILE_EDGE_WIDTH)}"/>')
+    return markup
 
 
 def icon_svg(face: Face) -> str:
@@ -459,12 +482,18 @@ def menubar_svg(face: Face) -> str:
 def lockup_svg(face: Face, theme: str) -> str:
     """Mark, wordmark, rule and حرف on one baseline.
 
-    The two themes are separate files with literal colours rather than one
-    file driven by `currentColor`: GitHub renders README artwork through an
-    `<img>`, where no stylesheet of ours reaches it.
+    `theme` names the ground the file is *for*, not a ground it paints: both
+    lockups are transparent, so each takes the colour of the page it is
+    dropped onto. `dark` carries light ink for a dark page — GitHub's is
+    #0d1117 — and `light` carries Ink for a light one. Painting our own
+    #0B0E13 or #F3F7F5 behind the artwork would put a visible rectangle on
+    both of those, the near-white one glaringly so.
+
+    They are two files with literal colours rather than one driven by
+    `currentColor` because GitHub renders README artwork through an `<img>`,
+    where no stylesheet of ours reaches it; `<picture>` picks between them.
     """
     dark = theme == "dark"
-    ground = CANVAS if dark else PAPER
     ink = "#FFFFFF" if dark else INK
     accent = TEAL if dark else DEEP
 
@@ -501,13 +530,12 @@ def lockup_svg(face: Face, theme: str) -> str:
     rule_height = LOCKUP_CAP - 32.0
 
     markup = (
-        f'<rect x="0" y="0" width="{number(width)}" '
-        f'height="{number(LOCKUP_HEIGHT)}" fill="{ground}"/>'
         # The tile is the same near-black on both grounds, because it is the
-        # app icon rather than a shape that reacts to the page. On the dark
-        # ground the glow is the only thing separating the two, which is
-        # deliberate: the mark should read as the icon, not as a black square.
-        + tile_markup(mark_box[0], mark_box[1], LOCKUP_MARK)
+        # app icon rather than a shape that reacts to the page. On a dark page
+        # the glow and the hairline edge are all that separate the two, which
+        # is deliberate: the mark should read as the icon, not as a black
+        # rectangle with a border.
+        tile_markup(mark_box[0], mark_box[1], LOCKUP_MARK, hairline=dark)
         + f'<path d="{path_data(mark_letter.contours)}" fill="{TEAL}"/>'
         f'<path d="{path_data(latin.contours)}" fill="{ink}"/>'
         f'<rect x="{number(rule_x)}" y="{number(rule_top)}" '
@@ -520,7 +548,7 @@ def lockup_svg(face: Face, theme: str) -> str:
         markup += f'<path d="{path_data([dot])}" fill="{accent}"/>'
 
     return svg_document(f"0 0 {number(width)} {number(LOCKUP_HEIGHT)}",
-                        width, LOCKUP_HEIGHT, f"Harf logo, {theme} ground",
+                        width, LOCKUP_HEIGHT, f"Harf logo, for {theme} grounds",
                         GLOW_DEF, markup)
 
 

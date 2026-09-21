@@ -16,8 +16,17 @@ the ف carrying the accent colour.
 | --- | --- |
 | `harf-icon.svg` | 1024pt master; the source `Resources/AppIcon.icns` is rasterised from |
 | `harf-menubar.svg` | the status item glyph, for documentation and the web |
-| `harf-lockup-dark.svg` | the lockup on a dark ground |
-| `harf-lockup-light.svg` | the lockup on a light ground |
+| `harf-lockup-dark.svg` | the lockup for dark pages |
+| `harf-lockup-light.svg` | the lockup for light pages |
+
+Both lockups are **transparent**. The name says which ground the file is for,
+not one it paints: `-dark` carries light ink for a dark page, `-light` carries
+Ink for a light one, and each takes the colour of whatever it is placed on.
+That is what lets the `<picture>` in the root README sit on GitHub's own
+`#0d1117` and `#ffffff` without a rectangle of our own showing around it. The
+mark's tile stays near-black in both, because it is the app icon rather than a
+shape that reacts to the page; in the dark file it gets a hairline white edge
+at 12% so it does not dissolve into a page darker than `#0B0E13`.
 
 The running app does not read any of these. Its menu bar glyph is
 `Sources/DodomaAppKit/MenuBarGlyph.swift`, generated from the same outlines as
@@ -47,8 +56,10 @@ Paper does not, which is why Deep teal exists.
 - Below 64pt the mark stands alone: the tile at icon sizes, the bare letter at
   menu bar sizes.
 - Do not recolour the letter, set it in another face by hand, stretch either
-  axis, or put the tile on a ground close to `#0B0E13` without the glow that
-  separates the two.
+  axis, or put the tile on a ground close to `#0B0E13` without the glow and
+  the hairline edge that separate the two.
+- Do not paint a rectangle behind a lockup to give it "its own" ground. If a
+  page needs one, the page owns it.
 
 ## Regenerating
 
