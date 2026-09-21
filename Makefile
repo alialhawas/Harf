@@ -9,7 +9,13 @@ CORPUS := Tests/DodomaCoreTests/Fixtures/corpus.tsv
 # SwiftPM resource bundle for the DodomaCore target: <package>_<target>.bundle
 RESOURCE_BUNDLE := Harf_DodomaCore.bundle
 
-.PHONY: dmg build bundle sign install run test fixtures logs ngrams eval clean
+# The face the brand marks are traced from. Its licence permits the letterform
+# in a logo but forbids redistributing the font software, so it lives outside
+# the repository in gitignored Tools/data/ — override this to retrace the
+# identity in another face.
+BRAND_FONT ?= Tools/data/fonts/thmanyahserifdisplay-Bold.otf
+
+.PHONY: dmg build bundle sign install run test fixtures logs ngrams brand eval clean
 
 build:
 	swift build -c release
@@ -107,6 +113,14 @@ logs:
 # project, and it only happens on a dev machine when Tools/data/ is cold.
 ngrams:
 	uv run Tools/build-ngrams.py
+
+# Regenerates the committed brand assets: the SVGs under docs/brand, the
+# generated menu bar glyph, and the .icns rasterised from the icon SVG. Needs
+# $(BRAND_FONT) to be present; the committed outputs are what a checkout
+# without the font builds from.
+brand:
+	uv run Tools/build-brand.py --font "$(BRAND_FONT)"
+	swift Tools/build-icon.swift
 
 clean:
 	rm -rf .build build

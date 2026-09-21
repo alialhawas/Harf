@@ -123,8 +123,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         pauseItem = NSMenuItem(title: "Pause Harf", action: nil, keyEquivalent: "")
         modeItem = NSMenuItem(title: "Mode", action: nil, keyEquivalent: "")
 
-        idleImage = NSImage(
-            systemSymbolName: "character.book.closed", accessibilityDescription: "Harf")
+        // Harf's own mark rather than an SF Symbol: the status item is the
+        // only place the app is ever seen, so it may as well be the app.
+        // Still optional, because `flash` restores `button.title = "⇄"` when
+        // there is no image to put back.
+        idleImage = MenuBarGlyph.image()
 
         super.init()
 
