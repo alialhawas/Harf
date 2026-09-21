@@ -7,3 +7,4 @@ build/
 # merged with is tracked, under Tools/dialect/.
 Tools/data/
 __pycache__/
+.gstack/

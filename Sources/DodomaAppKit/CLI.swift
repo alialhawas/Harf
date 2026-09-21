@@ -73,6 +73,25 @@ public enum CLI {
                                        apps allowed to rewrite without checking
                                        the caret first; see Per-app modes below
 
+          A change made here reaches the running copy straight away: the setting
+          is saved and that copy is then asked to re-read it, so the menu, the
+          settings window and the pipeline all move with it. If it cannot be
+          asked, the command says so — the setting is still saved and will be in
+          force at the next launch.
+
+          --words works the same way. The word is written to the file and the
+          running copy is asked to take it, which it does by merging the change
+          into the vocabulary it is already using — so a word added here counts
+          on the next keystroke, and the words it has learned this session are
+          not lost to the merge. Nothing has to be quit first.
+
+          --status reports the copy that is running, not this terminal: its
+          permissions, the settings it is actually enforcing, and the same status
+          line the menu shows. Permissions are granted per process, so the ones
+          a terminal has are not the ones the app has; when no copy is running,
+          or the running one does not answer, the grants read `unknown` rather
+          than `no` and the settings shown are the saved ones.
+
         Settings you can change            values                     default
           paused                           yes | no                   no
           sensitivity                      conservative | balanced    balanced
@@ -351,11 +370,11 @@ public enum CLI {
         case .config:
             return CLIConfig.dump(SettingsStore())
         case .set(let key, let value):
-            return CLIConfig.set(key, value, store: SettingsStore())
+            return writing { CLIConfig.set(key, value, store: $0) }
         case .policy(let bundleID, let mode):
-            return CLIConfig.policy(bundleID, mode, store: SettingsStore())
+            return writing { CLIConfig.policy(bundleID, mode, store: $0) }
         case .skipVerify(let bundleID, let state):
-            return CLIConfig.skipVerify(bundleID, state, store: SettingsStore())
+            return writing { CLIConfig.skipVerify(bundleID, state, store: $0) }
         case .unknown(let argument):
             return fail("unknown option '\(argument)'. Run harf --help for the full list.", code: 2)
         case .words(let action, let word, let language):
@@ -366,6 +385,45 @@ public enum CLI {
             print(helpText)
             return 0
         }
+    }
+
+    // MARK: - Writing a setting
+
+    /// Every command that changes the settings blob, wrapped so the copy that is
+    /// running finds out about it.
+    ///
+    /// The blob was always shared; what was missing was anybody re-reading it.
+    /// `SettingsStore` loads once at init and caches, so `harf --set paused yes`
+    /// against a running app changed a file and nothing else — and the app's next
+    /// write copied its stale cache straight over it. `UserDefaults
+    /// .didChangeNotification` does not help, being same-process only, so the
+    /// notification goes over the single-instance port instead.
+    ///
+    /// `flush` before the message, because the two ends are different processes:
+    /// without it the app can read the blob back before this one's write has left
+    /// its own `UserDefaults` cache, find the old bytes, and conclude that
+    /// nothing changed.
+    ///
+    /// A refusal is a warning, not a failure. The setting *is* saved; what did
+    /// not happen is the running copy taking it now, and the exit code has to
+    /// stay 0 or every script that changes a setting starts failing whenever the
+    /// app's run loop is busy.
+    ///
+    /// `--words` is not routed through here because it changes a different file
+    /// and sends a different message, but it does the same two things in the
+    /// same order: see `CLIConfig.tellTheRunningCopy`.
+    private static func writing(_ body: (SettingsStore) -> Int32) -> Int32 {
+        let store = SettingsStore()
+        let code = body(store)
+        guard code == 0 else { return code }
+
+        store.flush()
+        if SingleInstance.isHeld(), !SingleInstance.requestReload() {
+            warn(
+                "Harf is running but did not take the change; it will pick it up when it "
+                    + "restarts.")
+        }
+        return code
     }
 
     // MARK: - Quitting
@@ -697,7 +755,9 @@ public enum CLI {
         return 0
     }
 
-    private static func warn(_ message: String) {
+    /// Standard error, so a warning never lands in the middle of output a script
+    /// is parsing. Internal because `writing` is not the only caller any more.
+    static func warn(_ message: String) {
         FileHandle.standardError.write(Data("\(message)\n".utf8))
     }
 

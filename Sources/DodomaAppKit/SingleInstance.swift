@@ -80,10 +80,52 @@ public enum SingleInstance {
     /// those into an app that can never be started again.
     static let overrideEnvironmentKey = "HARF_IGNORE_INSTANCE"
 
-    /// The only message the port understands. A number rather than a payload:
-    /// nothing else is ever asked of the running copy, and a port that parses
-    /// what it is sent is a surface that has to be defended.
+    /// Asks the running copy to quit, the way the menu does.
+    ///
+    /// A number rather than a payload. That is the rule for all three of these:
+    /// requests carry no bytes at all, so the port never parses what it is
+    /// sent, and only the *replies* have a format. A port that parses input is
+    /// a surface that has to be defended; a port that only answers is not.
     static let quitMessageID: Int32 = 1
+
+    /// Asks for `RuntimeStatus.encoded()`. The one message with a reply, and
+    /// the reason `harf --status` can report the running copy's grants instead
+    /// of its own terminal's.
+    static let statusMessageID: Int32 = 2
+
+    /// Asks the running copy to re-read the settings blob. `harf --set` writes
+    /// the blob and then sends this; without it the store caches at init and
+    /// the app's next write copies its stale cache over the change.
+    static let reloadSettingsMessageID: Int32 = 3
+
+    /// Asks the running copy to fold a vocabulary edit into the words it is
+    /// using. `harf --words add|remove|clear` writes `lexicon.json` and then
+    /// sends this; without it the running copy holds the vocabulary it loaded
+    /// at launch and its next save puts that copy back over the edit.
+    ///
+    /// A separate number from the settings reload rather than one "something
+    /// changed" message, because the two are different files with different
+    /// owners: a `--set` must not make the app re-read a lexicon of thousands
+    /// of words, and a `--words` must not make it re-read settings it is
+    /// already enforcing.
+    static let reloadVocabularyMessageID: Int32 = 4
+
+    /// How long `--status` waits for the reply after the message has been
+    /// taken. Two seconds because the app's main run loop can legitimately be
+    /// busy — the modal single-instance alert, or `FixEngine` holding main
+    /// during an injection — and because the alternative to waiting is printing
+    /// something untrue.
+    private static let replyTimeout: CFTimeInterval = 2
+
+    /// The run-loop mode the reply is waited for in.
+    ///
+    /// The default mode on purpose, and it is load-bearing for the tests rather
+    /// than merely conventional: `claimPort` adds the port's source to
+    /// `.commonModes`, the default mode is one of those, so a single process can
+    /// serve its own status request. That makes the round trip — callback,
+    /// encoding, reply, decode — testable without arranging for a second copy
+    /// of Harf to exist.
+    private static let replyMode = CFRunLoopMode.defaultMode.rawValue
 
     /// Holds the claim open. A `CFMessagePort` unregisters its name when it is
     /// deallocated, so dropping this reference would hand the name back while
@@ -269,21 +311,50 @@ public enum SingleInstance {
 
     // MARK: - The claim
 
-    /// Handles a message on the claimed name. The only one it accepts asks the
-    /// app to quit, and it quits the way the menu does — `NSApp.terminate`, so
-    /// `applicationWillTerminate` runs and what was learned this session is
-    /// written out before the process goes.
+    /// Handles a message on the claimed name.
     ///
-    /// A C function pointer, so it captures nothing; everything it needs is
-    /// static. It is called on whichever run loop the source was added to,
-    /// which is the main one, but the hop is kept anyway: `CFMessagePort`
-    /// promises the run loop, not the thread, and `terminate` is main-thread
-    /// only.
+    /// A C function pointer, so it captures nothing; everything the three arms
+    /// need is static. `RuntimeStatus` exists because of this signature, not
+    /// the other way round.
+    ///
+    /// Nothing here blocks, and in particular nothing here is a
+    /// `DispatchQueue.main.sync`: the callback runs on whichever run loop the
+    /// source was added to, which is the main one, so a synchronous hop to main
+    /// would be a deadlock against itself. The two arms with main-thread work —
+    /// `NSApp.terminate`, and a settings reload that fires `onChange` into the
+    /// pipeline and the settings window — hop with `async` instead. The status
+    /// arm needs no hop at all: the lock box is thread-safe and the reply has to
+    /// be returned from this call.
+    ///
+    /// The reply is `passRetained`, which is the contract: CoreFoundation
+    /// releases the returned data once it has been sent.
+    ///
+    /// An unrecognised message ID does nothing. A newer build of `harf` on the
+    /// PATH talking to an older copy in /Applications is an ordinary state of
+    /// this machine, not an error.
     private static let handleMessage: CFMessagePortCallBack = { _, messageID, _, _ in
-        guard messageID == quitMessageID else { return nil }
-        Log.app.info("quit requested over \(portName, privacy: .public)")
-        DispatchQueue.main.async { NSApp.terminate(nil) }
-        return nil
+        switch messageID {
+        case quitMessageID:
+            Log.app.info("quit requested over \(portName, privacy: .public)")
+            DispatchQueue.main.async { NSApp.terminate(nil) }
+            return nil
+        case statusMessageID:
+            return Unmanaged.passRetained(RuntimeStatus.encoded() as CFData)
+        case reloadSettingsMessageID:
+            Log.app.info("settings reload requested over \(portName, privacy: .public)")
+            DispatchQueue.main.async { RuntimeStatus.handleReloadRequest() }
+            return nil
+        case reloadVocabularyMessageID:
+            Log.app.info("vocabulary reload requested over \(portName, privacy: .public)")
+            // No hop, because this arm has no main-thread work: the handler
+            // hands the merge to the lexicon's own queue and returns. Reading
+            // the file here, on the run loop the tap and the panels share,
+            // would be the one thing this arm must not do.
+            RuntimeStatus.handleVocabularyRequest()
+            return nil
+        default:
+            return nil
+        }
     }
 
     /// Claims the bootstrap name and starts answering on it, or reports that
@@ -448,6 +519,34 @@ public enum SingleInstance {
     /// `make install` does not appear to hang.
     private static let sendTimeout: CFTimeInterval = 2
 
+    /// How long a copy that took the quit message is given to let go of the
+    /// name before the request is reported as failed.
+    ///
+    /// "Took" is weaker than it sounds: `CFMessagePortSendRequest` succeeds
+    /// when the message is delivered, not when it is acted on. A build whose
+    /// port had no handler at all took the message just as happily — the
+    /// 2026-09-08 build did exactly that under `make install`: `--quit` said
+    /// the copy was quitting, the `pkill` fallback therefore never ran, and
+    /// the old process kept tapping the keyboard underneath the freshly
+    /// installed bundle. Waiting for the name to disappear is the only thing
+    /// that tells the two apart. Three seconds covers `applicationWillTerminate`
+    /// writing the lexicon on a loaded machine.
+    private static let quitGrace: CFTimeInterval = 3
+
+    /// True once nobody holds `name`, or false when it is still held after
+    /// `grace`. Polls, because there is no notification for a bootstrap name
+    /// going away and the process that registered it may be mid-exit.
+    static func waitUntilReleased(
+        name: String, within grace: CFTimeInterval, poll: CFTimeInterval = 0.1
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(grace)
+        while isHeld(name: name) {
+            if Date() >= deadline { return false }
+            Thread.sleep(forTimeInterval: poll)
+        }
+        return true
+    }
+
     /// Asks the running copy to quit, by the route that lets it save first.
     ///
     /// `pkill` is what the app used to tell people to use, and what `make
@@ -466,6 +565,11 @@ public enum SingleInstance {
             guard status == Int32(kCFMessagePortSuccess) else {
                 return .failed("the running copy did not take the request (error \(status))")
             }
+            guard waitUntilReleased(name: name, within: quitGrace) else {
+                return .failed(
+                    "the running copy took the request but is still running after \(Int(quitGrace)) seconds"
+                )
+            }
             return .messaged
         }
 
@@ -478,6 +582,65 @@ public enum SingleInstance {
             return .failed("process \(other.instance.pid) refused to quit")
         }
         return .terminated(other.instance.pid)
+    }
+
+    // MARK: - Asking the running copy about itself
+
+    /// What the copy holding the name says about itself, or nil when there is
+    /// nothing trustworthy to say.
+    ///
+    /// Nil covers three different states on purpose — nobody holds the name,
+    /// the holder did not answer inside `replyTimeout`, and the reply could not
+    /// be decoded — because `--status` renders all three the same way: as
+    /// *unknown*. The one thing it must never do is render them as *no*. A main
+    /// run loop stuck behind a modal alert is not a revoked Accessibility
+    /// grant, and printing `accessibility no` for it sends the reader to System
+    /// Settings to fix something that is not broken.
+    ///
+    /// A lookup, never a registration: like `isHeld`, this cannot turn the
+    /// asker into the second copy it is asking about.
+    static func requestStatus(name: String = portName) -> RuntimeSnapshot? {
+        guard let remote = CFMessagePortCreateRemote(nil, name as CFString) else { return nil }
+
+        var reply: Unmanaged<CFData>?
+        let status = CFMessagePortSendRequest(
+            remote, statusMessageID, nil, sendTimeout, replyTimeout, replyMode, &reply)
+        guard status == Int32(kCFMessagePortSuccess) else { return nil }
+        return RuntimeStatus.decode(reply?.takeRetainedValue() as Data?)
+    }
+
+    /// Tells the running copy that the settings blob has changed under it.
+    ///
+    /// Fire-and-forget — receive timeout 0, no reply mode — because there is
+    /// nothing to wait for: the blob is the shared state and this is only the
+    /// nudge to go and read it. Waiting for the app to finish reloading would
+    /// put a `harf --set` behind whatever the main run loop is doing, and the
+    /// answer would not change what the command prints.
+    ///
+    /// False means the message was not taken, which is worth saying out loud:
+    /// the setting is saved, but the copy that is running is still enforcing the
+    /// old one until it restarts.
+    @discardableResult
+    static func requestReload(name: String = portName) -> Bool {
+        guard let remote = CFMessagePortCreateRemote(nil, name as CFString) else { return false }
+        return CFMessagePortSendRequest(
+            remote, reloadSettingsMessageID, nil, sendTimeout, 0, nil, nil)
+            == Int32(kCFMessagePortSuccess)
+    }
+
+    /// Tells the running copy that `lexicon.json` has changed under it.
+    ///
+    /// Fire-and-forget for the same reason as `requestReload`: the file is the
+    /// shared state and this is only the nudge to go and read it. False means
+    /// the message was not taken — the edit is on disk either way, and the
+    /// running copy's own save merges it rather than overwriting it, but it is
+    /// not using the new word yet.
+    @discardableResult
+    static func requestVocabularyReload(name: String = portName) -> Bool {
+        guard let remote = CFMessagePortCreateRemote(nil, name as CFString) else { return false }
+        return CFMessagePortSendRequest(
+            remote, reloadVocabularyMessageID, nil, sendTimeout, 0, nil, nil)
+            == Int32(kCFMessagePortSuccess)
     }
 
     /// What `--quit` prints. Pure, so the four answers are a test rather than

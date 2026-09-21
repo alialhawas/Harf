@@ -27,6 +27,20 @@ public struct CandidateRegion: Equatable, Sendable {
     /// Exactly the text a fix replaces.
     public let typedText: String
     /// Letters only: punctuation and spaces do not count towards length gates.
+    ///
+    /// Counted under whichever of the two readings has more of them, because a
+    /// single key is a letter in one language and punctuation in the other.
+    /// حراج typed with the US layout selected arrives as `pnh[`, and counting
+    /// the typed reading alone made that three letters — below
+    /// `suggestMinLetters` — so the word was passed over for a bracket. It is
+    /// not one word's bad luck either: ج ة ك ؛ and their neighbours all sit on
+    /// US punctuation keys, so Arabic ran systematically short of the length
+    /// gates. How much text there is to judge is a property of the run, not of
+    /// the layout that happened to be selected when it was typed.
+    ///
+    /// This is a length gate and nothing more. The guards that refuse to touch
+    /// a URL, a path or an identifier read the typed text on their own terms
+    /// and are untouched by it.
     public let letterCount: Int
     /// Tokens in the region that were finished with a space. A region with at
     /// least one is far safer to auto-fix than a word still being typed.
@@ -238,10 +252,13 @@ public enum Segmenter {
         let typedText = onScreenText(of: regionKeys, layout: currentLayout)
         let votes = tally(of: scored[firstAccepted...])
 
+        let alternateText = bestAlternateReading(
+            of: regionKeys, layout: alternateLayout, model: models.alternate)
+
         return CandidateRegion(
             keys: regionKeys,
             typedText: typedText,
-            letterCount: typedText.filter(\.isLetter).count,
+            letterCount: max(letterCount(of: typedText), letterCount(of: alternateText)),
             completedTokenCount: tokens[firstAccepted...].filter(\.isCompleted).count,
             alternateVotes: votes.alternate,
             currentVotes: votes.current)
@@ -324,6 +341,26 @@ public enum Segmenter {
             ).combined }
             .max() ?? 0
         return alternate - current
+    }
+
+    /// The other layout's best reading of the same keys, chosen the way
+    /// `FixDecision.bestAlternate` chooses the one it would actually propose —
+    /// by score, across the caps modes. The length gates have to measure the
+    /// reading that is on offer, so they have to measure the same one.
+    private static func bestAlternateReading(
+        of keys: [CapturedKey], layout: KeyboardLayout, model: LanguageModel
+    ) -> String {
+        var best: (text: String, score: Double)?
+        for capsMode in CapsMode.allCases {
+            let text = LayoutRenderer.render(keys, layout: layout, capsMode: capsMode)
+            let score = model.combined(text).combined
+            if best == nil || score > best!.score { best = (text, score) }
+        }
+        return best?.text ?? ""
+    }
+
+    private static func letterCount(of text: String) -> Int {
+        text.filter(\.isLetter).count
     }
 
     /// Whether a token is too short to be evidence for either language.

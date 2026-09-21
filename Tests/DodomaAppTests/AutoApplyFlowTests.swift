@@ -14,33 +14,16 @@ import XCTest
 /// the seam they do not cover.
 final class AutoApplyFlowTests: XCTestCase {
     private var harness: PipelineHarness!
-    private let lock = NSLock()
-    private var decisions: [DecisionSnapshot] = []
 
     override func setUp() {
         super.setUp()
         harness = PipelineHarness()
         harness.oracle.answer(caret: Fixtures.caretBeforeFix)
-        harness.pipeline.onDecision = { [weak self] snapshot in
-            guard let self else { return }
-            self.lock.lock()
-            self.decisions.append(snapshot)
-            self.lock.unlock()
-        }
     }
 
     override func tearDown() {
         harness = nil
-        lock.lock()
-        decisions.removeAll()
-        lock.unlock()
         super.tearDown()
-    }
-
-    private var lastDecision: DecisionSnapshot? {
-        lock.lock()
-        defer { lock.unlock() }
-        return decisions.last
     }
 
     /// The whole happy path: the fix reaches the injector, is reported as an
@@ -59,8 +42,8 @@ final class AutoApplyFlowTests: XCTestCase {
         XCTAssertTrue(harness.offers.isEmpty, "the auto path does not raise a suggestion")
         XCTAssertEqual(harness.undoAppliedCount, 0, "and it is not an undo")
 
-        XCTAssertEqual(lastDecision?.verdict, "autoApply")
-        XCTAssertEqual(lastDecision?.result, "applied", "the `.auto` ApplyKind label")
+        XCTAssertEqual(harness.lastDecision?.verdict, "autoApply")
+        XCTAssertEqual(harness.lastDecision?.result, "applied", "the `.auto` ApplyKind label")
     }
 
     /// A successful auto-apply is undoable, exactly like an accepted suggestion:
@@ -164,30 +147,5 @@ extension AutoApplyFlowTests {
 
         XCTAssertEqual(harness.engine.applied.count, 1, "no burst was posted")
         XCTAssertEqual(harness.rejectionCount, 1, "the user asked, so the refusal is shown")
-    }
-}
-
-// MARK: - Evaluations that never happened
-
-extension AutoApplyFlowTests {
-    /// The layout cache is repopulated on the main thread after every
-    /// enabled-sources change, and enumerating input sources from the pipeline
-    /// queue is a Text Input Sources call off-main — so a quiet period that
-    /// lands inside that window is skipped. Skipped, not abandoned: without
-    /// another trigger the word typed across the change is never looked at
-    /// again until the user types more.
-    func testAColdLayoutCacheLeavesTheEvaluationArmed() {
-        harness.type("h")
-        XCTAssertTrue(harness.isEvaluationArmed, "precondition: the first trigger is armed")
-
-        let fired = expectation(description: "the trigger fired")
-        harness.pipeline.queue.asyncAfter(
-            deadline: .now() + TypingSession.triggerDelay + 0.2
-        ) { fired.fulfill() }
-        wait(for: [fired], timeout: 5)
-        harness.drain()
-
-        XCTAssertTrue(harness.isEvaluationArmed)
-        XCTAssertEqual(harness.buffer.text, "h", "and the buffer is still there to evaluate")
     }
 }

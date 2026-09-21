@@ -78,6 +78,14 @@ final class CLIHelpTests: XCTestCase {
         XCTAssertTrue(CLI.helpText.contains("--quit"), CLI.helpText)
     }
 
+    /// The header comment of `CLIConfig` claimed for months that a write from a
+    /// shell reached a running app; it did not, and nobody could have known
+    /// from the outside. Now it does, and the promise belongs where the user
+    /// reads it rather than only in a source file.
+    func testHelpSaysAChangeReachesTheRunningCopy() {
+        XCTAssertTrue(CLI.helpText.contains("reaches the running copy"), CLI.helpText)
+    }
+
     /// The two ways past the launch rules exist for people who will only find
     /// them if they are written down.
     func testHelpDocumentsBothEnvironmentOverrides() {

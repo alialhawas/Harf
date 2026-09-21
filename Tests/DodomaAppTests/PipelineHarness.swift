@@ -282,6 +282,8 @@ final class PipelineHarness {
     private var hides = 0
     private var switches: [String] = []
     private var flipped: [Flip] = []
+    private var decided: [DecisionSnapshot] = []
+    private var refreshRequests = 0
     private var latest = BufferSnapshot()
     /// Fulfilled by the next flip that lands. See `awaitFlipCard`.
     private var flipWaiter: XCTestExpectation?
@@ -312,8 +314,14 @@ final class PipelineHarness {
         // without this every flip test would depend on the tester having
         // Arabic installed.
         pipeline.layoutPair = { HarnessLayouts.pair }
+        // The refusal's recovery path, answering "nothing was repaired" — the
+        // only honest default for a harness whose pair comes from a fixture
+        // rather than from the machine's input sources, where re-reading the
+        // real selection could not change anything.
+        setLayoutRefresh { false }
 
         pipeline.onChange = { [weak self] snapshot in self?.note(snapshot: snapshot) }
+        pipeline.onDecision = { [weak self] snapshot in self?.append(decision: snapshot) }
         pipeline.onSuggest = { [weak self] offer in self?.append(offer: offer.fix) }
         pipeline.onAutoApply = { [weak self] applied in self?.append(applied: applied) }
         pipeline.onRequestRejected = { [weak self] in self?.bumpRejections() }
@@ -344,6 +352,27 @@ final class PipelineHarness {
     }
 
     // MARK: Driving
+
+    /// Replaces the layout pair the evaluation and the flip resolve against.
+    ///
+    /// `queue.sync` because the seam is read on the pipeline queue, and a test
+    /// that assigned it from its own thread would be racing whatever evaluation
+    /// is already in flight.
+    func setLayoutPair(_ pair: @escaping () -> (english: KeyboardLayout, arabic: KeyboardLayout)?) {
+        pipeline.queue.sync { pipeline.layoutPair = pair }
+    }
+
+    /// Replaces the answer the pipeline gets when it asks for the selected
+    /// input source to be re-read. The request is counted either way, so a test
+    /// can install its own answer and still assert how often it was asked.
+    func setLayoutRefresh(_ refresh: @escaping () -> Bool) {
+        pipeline.queue.sync {
+            pipeline.layoutRefresh = { [weak self] in
+                self?.bumpLayoutRefreshRequests()
+                return refresh()
+            }
+        }
+    }
 
     /// Tells the pipeline an application came to the front, the way the real
     /// frontmost observer would.
@@ -410,6 +439,22 @@ final class PipelineHarness {
         for _ in 0..<rounds { pipeline.queue.sync {} }
     }
 
+    /// Waits out the idle trigger, so the evaluation it armed has run.
+    ///
+    /// An expectation rather than `drain()`, and not only because the delay has
+    /// to elapse: the refusal path hops to the main thread to re-read the
+    /// selected input source, and the main thread is the one the test itself is
+    /// sitting on. Draining the pipeline queue would prove nothing about that
+    /// hop; waiting is what lets the main queue run.
+    func waitForTrigger(_ test: XCTestCase, timeout: TimeInterval = 5) {
+        let fired = test.expectation(description: "the idle trigger fired")
+        pipeline.queue.asyncAfter(deadline: .now() + TypingSession.triggerDelay + 0.2) {
+            fired.fulfill()
+        }
+        test.wait(for: [fired], timeout: timeout)
+        drain()
+    }
+
     /// Waits out the window in which input is ignored after an apply. Needed
     /// only by tests that do a second thing to the pipeline afterwards.
     func waitForApplyTail(_ test: XCTestCase) {
@@ -451,6 +496,25 @@ final class PipelineHarness {
         lock.lock()
         defer { lock.unlock() }
         return hides
+    }
+
+    /// Every decision the pipeline published, in order — including the
+    /// `skipped` ones, which are the only trace an evaluation that did nothing
+    /// leaves behind.
+    var decisions: [DecisionSnapshot] {
+        lock.lock()
+        defer { lock.unlock() }
+        return decided
+    }
+
+    var lastDecision: DecisionSnapshot? { decisions.last }
+
+    /// How many times a refused evaluation asked for the selected input source
+    /// to be re-read.
+    var layoutRefreshRequests: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return refreshRequests
     }
 
     /// The flips published to the card, in order.
@@ -522,6 +586,18 @@ final class PipelineHarness {
     private func append(applied: AppliedFix) {
         lock.lock()
         appliedFixes.append(applied)
+        lock.unlock()
+    }
+
+    private func append(decision: DecisionSnapshot) {
+        lock.lock()
+        decided.append(decision)
+        lock.unlock()
+    }
+
+    private func bumpLayoutRefreshRequests() {
+        lock.lock()
+        refreshRequests += 1
         lock.unlock()
     }
 

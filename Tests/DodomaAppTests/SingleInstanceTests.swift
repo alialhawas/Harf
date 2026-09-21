@@ -1,6 +1,7 @@
 import XCTest
 
 @testable import DodomaAppKit
+@testable import DodomaCore
 
 /// Which of the copies of Harf on the machine this one has to stand down for,
 /// what it tells the user about the one that won, and how it stops it.
@@ -44,6 +45,13 @@ final class SingleInstanceTests: XCTestCase {
     /// depending on whether that copy happened to be up.
     private func uniqueName() -> String {
         "com.ali.dodoma.test.\(UUID().uuidString)"
+    }
+
+    /// The status lock box is static, so a snapshot or a reload handler left
+    /// behind by one test would be read by the next one.
+    override func tearDown() {
+        RuntimeStatus.forget()
+        super.tearDown()
     }
 
     // MARK: - Bundled copies
@@ -243,6 +251,197 @@ final class SingleInstanceTests: XCTestCase {
         let name = uniqueName()
         SingleInstance.claimPort(name: name)
         XCTAssertTrue(SingleInstance.isHeld(name: name))
+    }
+
+    // MARK: - What the name answers
+
+    /// A snapshot with something recognisable in it, so a reply can be told
+    /// apart from a default-constructed one.
+    private func publishedSnapshot(pid: Int32 = 4321) -> RuntimeSnapshot {
+        var settings = AppSettings.defaults
+        settings.aggressiveness = .eager
+        return RuntimeSnapshot(
+            appVersion: Dodoma.version,
+            pid: pid,
+            permissions: PermissionState(accessibility: true, inputMonitoring: false),
+            capturing: true,
+            paused: true,
+            secureInput: false,
+            degraded: false,
+            loginItem: .requiresApproval,
+            settings: settings)
+    }
+
+    /// A message ID this build does not know, sent the way a newer `harf` would
+    /// send one. Raw CF rather than a `SingleInstance` helper, because the
+    /// point is precisely that there is no helper for it.
+    ///
+    /// Deliberately fire-and-forget: waiting for a reply that is never coming
+    /// would spend the timeout, and "no reply" is what being ignored looks
+    /// like from the outside anyway.
+    private func sendRaw(_ messageID: Int32, to name: String) -> Bool {
+        guard let remote = CFMessagePortCreateRemote(nil, name as CFString) else { return false }
+        return CFMessagePortSendRequest(remote, messageID, nil, 2, 0, nil, nil)
+            == Int32(kCFMessagePortSuccess)
+    }
+
+    /// Lets the port's run-loop source run, which is where the callback
+    /// happens. The tests run on the main thread and the source is on the main
+    /// run loop, so nothing is delivered until the run loop is given a moment.
+    private func spinTheRunLoop(for seconds: TimeInterval = 0.2) {
+        RunLoop.current.run(until: Date().addingTimeInterval(seconds))
+    }
+
+    /// The whole point of the second message ID: `--status` gets the running
+    /// copy's own state instead of reading its own process and calling the
+    /// answer the app's.
+    ///
+    /// One process answering its own request is not a trick to make the test
+    /// pass — it is why the reply mode is the default mode. `claimPort` adds the
+    /// source to `.commonModes`, the default mode is one of those, and
+    /// `CFMessagePortSendRequest` runs the caller's run loop in the reply mode
+    /// while it waits. The cross-process half is the same call with a different
+    /// run loop at the far end.
+    func testAStatusRequestComesBackWithThePublishedSnapshot() {
+        let name = uniqueName()
+        XCTAssertTrue(SingleInstance.claimPort(name: name))
+        let published = publishedSnapshot(pid: 4321)
+        RuntimeStatus.publish(published)
+
+        XCTAssertEqual(SingleInstance.requestStatus(name: name), published)
+    }
+
+    /// Nobody there is not "no": `--status` renders this as unknown, because
+    /// the grants of a copy that is not running are not false, they are
+    /// unknowable.
+    func testAStatusRequestToANameNobodyHoldsIsNothing() {
+        XCTAssertNil(SingleInstance.requestStatus(name: uniqueName()))
+    }
+
+    // MARK: - Waiting for a name to be released
+
+    /// The half of `--quit` that a delivered-but-ignored message used to skip:
+    /// a name still held after the grace period is a copy that did not quit.
+    /// This process holds the name for the whole test, so the wait must give
+    /// up rather than return early.
+    func testWaitingOnANameStillHeldGivesUpAfterTheGrace() {
+        let name = uniqueName()
+        SingleInstance.claimPort(name: name)
+        let started = Date()
+        XCTAssertFalse(SingleInstance.waitUntilReleased(name: name, within: 0.3, poll: 0.05))
+        XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(started), 0.3)
+    }
+
+    func testWaitingOnANameNobodyHoldsReturnsAtOnce() {
+        let started = Date()
+        XCTAssertTrue(SingleInstance.waitUntilReleased(name: uniqueName(), within: 2))
+        XCTAssertLessThan(Date().timeIntervalSince(started), 1)
+    }
+
+    /// A copy between claiming the name and its first permission poll answers
+    /// with no bytes, which must not decode into a screen of defaults.
+    func testAStatusRequestBeforeAnythingIsPublishedIsNothing() {
+        let name = uniqueName()
+        SingleInstance.claimPort(name: name)
+
+        XCTAssertNil(SingleInstance.requestStatus(name: name))
+    }
+
+    /// How a `harf --set` reaches a copy that is already running. The blob is
+    /// the shared state; this is only the nudge to go and re-read it.
+    func testAReloadRequestRunsTheInstalledHandler() {
+        let name = uniqueName()
+        SingleInstance.claimPort(name: name)
+        let ran = expectation(description: "the reload handler ran")
+        RuntimeStatus.setReloadHandler { ran.fulfill() }
+
+        XCTAssertTrue(SingleInstance.requestReload(name: name))
+
+        wait(for: [ran], timeout: 2)
+    }
+
+    /// How a `harf --words` reaches a copy that is already running. The file is
+    /// the shared state; this is only the nudge to go and merge it.
+    func testAVocabularyRequestRunsTheInstalledHandler() {
+        let name = uniqueName()
+        SingleInstance.claimPort(name: name)
+        let ran = expectation(description: "the vocabulary handler ran")
+        RuntimeStatus.setVocabularyHandler { ran.fulfill() }
+
+        XCTAssertTrue(SingleInstance.requestVocabularyReload(name: name))
+
+        wait(for: [ran], timeout: 2)
+    }
+
+    /// The whole route a `harf --words add` takes, with the handler wired the
+    /// way `AppDelegate` wires it: the file is written by one lexicon, the
+    /// message is sent, and the other lexicon — the one a running app would be
+    /// scoring with — is using the word afterwards. What it counted in the
+    /// meantime and never saved is still there.
+    func testAVocabularyRequestReachesTheLexiconTheAppIsUsing() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lex-\(UUID().uuidString).json")
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+
+        let running = UserLexicon(url: url)
+        for _ in 0..<UserLexicon.promotionThreshold {
+            running.observe(["endpoint"], language: .english)
+        }
+
+        let name = uniqueName()
+        SingleInstance.claimPort(name: name)
+        let merged = expectation(description: "the lexicon merged the edit")
+        RuntimeStatus.setVocabularyHandler {
+            running.reload()
+            merged.fulfill()
+        }
+
+        let shell = UserLexicon(url: url)
+        shell.add("kubectl", language: .english)
+        XCTAssertTrue(shell.save())
+        XCTAssertTrue(SingleInstance.requestVocabularyReload(name: name))
+
+        wait(for: [merged], timeout: 2)
+        XCTAssertTrue(running.contains("kubectl", language: .english))
+        XCTAssertTrue(running.contains("endpoint", language: .english), "learned, never saved")
+    }
+
+    /// The two nudges are different messages on purpose: the settings blob and
+    /// the lexicon are different files, and a `--set` that made the app re-read
+    /// thousands of words — or a `--words` that made it re-read settings it is
+    /// already enforcing — would be work nobody asked for.
+    func testTheTwoReloadsDoNotRunEachOthersHandlers() {
+        let name = uniqueName()
+        SingleInstance.claimPort(name: name)
+        var settings = 0
+        var vocabulary = 0
+        RuntimeStatus.setReloadHandler { settings += 1 }
+        RuntimeStatus.setVocabularyHandler { vocabulary += 1 }
+
+        XCTAssertTrue(SingleInstance.requestVocabularyReload(name: name))
+        spinTheRunLoop()
+
+        XCTAssertEqual(vocabulary, 1)
+        XCTAssertEqual(settings, 0)
+    }
+
+    /// The port is a surface, and a newer build — or anything else that finds
+    /// the name — can send it a number this one has never heard of. It does
+    /// nothing at all, rather than falling into the nearest arm.
+    func testAnUnknownMessageIDIsIgnored() {
+        let name = uniqueName()
+        SingleInstance.claimPort(name: name)
+        var reloads = 0
+        RuntimeStatus.setReloadHandler { reloads += 1 }
+        RuntimeStatus.setVocabularyHandler { reloads += 1 }
+
+        XCTAssertTrue(sendRaw(99, to: name))
+        spinTheRunLoop()
+
+        XCTAssertEqual(reloads, 0)
+        // And the port is still serving the arms it does know.
+        RuntimeStatus.publish(publishedSnapshot())
+        XCTAssertNotNil(SingleInstance.requestStatus(name: name))
     }
 
     // MARK: - The override

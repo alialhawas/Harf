@@ -7,20 +7,25 @@ import ServiceManagement
 /// A flattened `SMAppService.Status`: the four cases that matter to the UI,
 /// plus the one the framework has no case for — being asked at all from a
 /// process that is not in an app bundle, which is what `swift run` is.
-enum LoginItemStatus: Equatable {
+///
+/// The raw values are spelled out rather than left to the compiler, because
+/// they are a wire format: the running copy sends this to `harf --status` over
+/// the single-instance port, and the two ends can be different builds. A case
+/// renamed in Swift must not silently rename the string an older copy sends.
+enum LoginItemStatus: String, Codable, Equatable {
     /// Registered and allowed to run.
-    case enabled
+    case enabled = "enabled"
     /// Never registered, or unregistered again.
-    case disabled
+    case disabled = "disabled"
     /// Registered, but the user has to switch it on under
     /// System Settings > General > Login Items. macOS does not let an app
     /// grant this to itself, so the UI can only link there.
-    case requiresApproval
+    case requiresApproval = "requiresApproval"
     /// The service is gone as far as launchd is concerned — the usual cause is
     /// a bundle that has been moved or deleted since it was registered.
-    case notFound
+    case notFound = "notFound"
     /// Not a bundled app, so there is nothing to register.
-    case unavailable
+    case unavailable = "unavailable"
 
     /// What the settings and onboarding windows put under the toggle. Empty
     /// when there is nothing worth saying.

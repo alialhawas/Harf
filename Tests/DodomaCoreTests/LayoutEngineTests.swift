@@ -112,4 +112,98 @@ final class LayoutEngineTests: XCTestCase {
         engine.noteSelectedLayout(LayoutFixtures.abcSourceID)
         XCTAssertNil(engine.cachedPair())
     }
+
+    // MARK: - Healing a warm cache with a bad selection
+
+    /// The list the refresh seam is handed, and a warm cache built from it.
+    private func warmEngine(selecting sourceID: String? = LayoutFixtures.abcSourceID)
+        -> (engine: LayoutEngine, all: [KeyboardLayout])
+    {
+        let all = [english(LayoutFixtures.abcSourceID), arabic(LayoutFixtures.arabicSourceID)]
+        let engine = LayoutEngine()
+        _ = engine.refreshSelection(reading: { sourceID }, enumerating: { all })
+        return (engine, all)
+    }
+
+    /// The failure that cost two days: Text Input Sources answered `nil` while
+    /// the selection was mid-switch, the cache took that as the answer, and
+    /// `cachedPair()` then refused forever with nothing left to re-read it.
+    /// There is always a selected source, so `nil` only ever means the read
+    /// failed — never that nothing is selected.
+    func testANilSelectionDoesNotEraseAGoodOne() {
+        let (engine, _) = warmEngine()
+        XCTAssertNotNil(engine.cachedPair(), "precondition: the cache resolves")
+
+        engine.noteSelectedLayout(nil)
+
+        XCTAssertNotNil(engine.cachedPair(), "the good selection survived the failed read")
+    }
+
+    func testRefreshingAColdCacheEnumeratesAndResolves() {
+        let all = [english(LayoutFixtures.abcSourceID), arabic(LayoutFixtures.arabicSourceID)]
+        let engine = LayoutEngine()
+        var enumerations = 0
+
+        let repaired = engine.refreshSelection(
+            reading: { LayoutFixtures.abcSourceID },
+            enumerating: {
+                enumerations += 1
+                return all
+            })
+
+        XCTAssertTrue(repaired)
+        XCTAssertEqual(enumerations, 1)
+        XCTAssertEqual(engine.cachedPair()?.english.sourceID, LayoutFixtures.abcSourceID)
+    }
+
+    /// A refresh that cannot read the selection changes nothing and enumerates
+    /// nothing: copying every `uchr` table to learn that the system is busy
+    /// would be the expensive way to find out.
+    func testAnUnreadableSelectionLeavesTheCacheAlone() {
+        let (engine, _) = warmEngine()
+
+        let repaired = engine.refreshSelection(
+            reading: { nil },
+            enumerating: {
+                XCTFail("a failed selection read must not trigger an enumeration")
+                return []
+            })
+
+        XCTAssertFalse(repaired)
+        XCTAssertEqual(engine.cachedPair()?.english.sourceID, LayoutFixtures.abcSourceID)
+    }
+
+    /// A selection the cached list has never heard of means the list itself is
+    /// stale — an enabled-sources notification that was coalesced away, or a
+    /// source enabled since. Re-enumerating is the only way to tell that apart
+    /// from an input method, and it is the case that heals.
+    func testASelectionMissingFromTheListReEnumeratesAndResolves() {
+        let (engine, all) = warmEngine()
+        let widened = all + [english("com.apple.keylayout.Dvorak")]
+        var enumerations = 0
+
+        let repaired = engine.refreshSelection(
+            reading: { "com.apple.keylayout.Dvorak" },
+            enumerating: {
+                enumerations += 1
+                return widened
+            })
+
+        XCTAssertTrue(repaired)
+        XCTAssertEqual(enumerations, 1)
+        XCTAssertEqual(engine.cachedPair()?.english.sourceID, "com.apple.keylayout.Dvorak")
+    }
+
+    /// The other half of that re-enumeration: a selection still absent from the
+    /// fresh list is an input method, which carries no `uchr` table and can
+    /// never be rendered. The refresh reports honestly that it repaired nothing.
+    func testASelectionThatMovedToAnInputMethodStillHasNoPair() {
+        let (engine, all) = warmEngine()
+
+        let repaired = engine.refreshSelection(
+            reading: { "com.apple.inputmethod.SCIM.ITABC" }, enumerating: { all })
+
+        XCTAssertFalse(repaired)
+        XCTAssertNil(engine.cachedPair())
+    }
 }

@@ -223,7 +223,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
     }
 
-    private static func statusText(
+    /// The one sentence that says what the app is doing, for the menu's first
+    /// line — and, since it is the only place that sentence is composed, for
+    /// `harf --status`'s `state` line as well. Internal rather than private for
+    /// that second reader: two renderings of the same five values would
+    /// eventually disagree, and the whole point of `--status` reporting the
+    /// running copy is that it says what the menu says.
+    static func statusText(
         for state: PermissionState, capturing: Bool, paused: Bool, secureInput: Bool,
         degraded: Bool
     ) -> String {

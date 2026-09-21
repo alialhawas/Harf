@@ -61,6 +61,12 @@ GitHub serves `.html` as plain text rather than rendering it, which is why the
 deck link goes through `htmlpreview` — it fetches the raw file and renders it in
 place. Nothing is uploaded anywhere.
 
+The [Harf origin story](docs/why-we-built-harf.html) covers the Arabic/English
+workflow that inspired the app, interactive system diagrams, and setup. Readers
+can switch the complete article between English and Arabic. It uses Hatif
+branding with PlanetScale-style illustrations. Open the HTML file from a
+checkout; keep the adjacent `docs/assets/` directory for its logo, fonts, and SVG.
+
 
 
 Harf does not read the characters on your screen and guess. It records the
@@ -516,7 +522,11 @@ rather than taken on faith.
         endpoint     4/10
 
 The file is rewritten at most every twenty seconds while the app runs, so what
-you read is current without having to quit it.
+you read is current without having to quit it. Edits go the other way just as
+promptly: `add`, `remove` and `clear` write the file and then tell the running
+copy, which merges the change into the vocabulary it is using rather than
+replacing it — so a word added here counts on your next keystroke, the words
+learned earlier in the session survive, and nothing has to be quit first.
 
 What can be learned is deliberately narrow:
 
@@ -671,8 +681,10 @@ is worth a run before trusting a build.
 
 The same binary is the menu-bar app and the command line, so there is no second
 executable to install. The Homebrew cask puts it on your PATH as `harf`; from a
-checkout, `swift run Harf <args>` is the same thing. Both edit the settings the
-running app reads, so a change reaches it on its next evaluation — no restart.
+checkout, `swift run Harf <args>` is the same thing. A change made here reaches
+the running copy without a restart: the setting is saved and that copy is then
+asked to re-read it. If it cannot be asked, the command says so on standard
+error — the setting is saved either way and is in force at the next launch.
 
 ### Starting and stopping
 
@@ -718,9 +730,10 @@ Two escape hatches, both for development:
 ```
 Harf 1.0.0
 
-  running          yes
+  running          yes (process 4321)
   accessibility    yes
   input monitoring yes
+  state            Active (capturing)
 
   launch at login  yes
   shortcuts        ⌥⌘Z undo, ⌥⌘P pause, ⌃⌘F flip
@@ -745,6 +758,21 @@ Harf 1.0.0
   words learned    8  (0 added by hand, 394 on the way)
   vocabulary file  /Users/you/Library/Application Support/Harf/lexicon.json
 ```
+
+Every line above is the *running copy's* answer, not the terminal's. That
+distinction is the whole reason the command asks it: macOS grants Accessibility
+and Input Monitoring per process, so a terminal that has been granted
+Accessibility — which any terminal running a build script has — used to make
+`--status` print `accessibility yes` while the app itself was logging
+`accessibility=false`, and the `state` line is the same sentence the menu bar
+shows, taken from the same renderer. The settings are the ones that copy has
+*applied*, and when they differ from what is saved the command says so.
+
+With nothing running, or with a copy whose main run loop is busy enough not to
+answer within two seconds, the grants read `unknown` rather than `no` — a
+question that could not be asked has no answer, and `no` would send you to
+System Settings to re-grant something that was never revoked. The settings shown
+are then the saved ones, marked as such.
 
 `harf --help` lists every command, every setting you can change, the values each
 one accepts and its default. `harf --config` prints the settings as JSON, for

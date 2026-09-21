@@ -213,6 +213,26 @@ can drive end to end.
 | 117 | Get a card on screen and immediately type through it, repeatedly (C13) | The Tab key keeps working in the application underneath. The card is never left swallowing keys after it has gone | |
 | 118 | Switch layouts with ⌃Space mid-sentence, then type a wrong-layout word and wait (C11) | The word is still evaluated. Before this it was skipped and never looked at again until another key was pressed | |
 
+## K. What the command line says about the running copy
+
+Rows added with the status/reload work planned in
+`.claude/plans/url-snug-perlis.md`, and with the vocabulary edits that followed
+it. Every one of them is cross-process by nature: the command and the app are
+two processes with different permissions, different caches and different ideas
+of the time, and no headless test can put them in the same room.
+
+Run every row from a terminal that **has** been granted Accessibility — a
+terminal running `make` usually has — because that grant is exactly what used to
+make `--status` lie.
+
+| # | Do | Expect | ★ |
+| --- | --- | --- | --- |
+| 119 | With Harf running, open the menu, note the first line, then run `harf --status` (B7) | `running yes (process N)` with the pid of the running copy, `accessibility yes`, `input monitoring yes`, and a `state` line that is **the same sentence** the menu's first line shows. Repeat with the app paused (⌥⌘P) and under a password prompt: the `state` line tracks the menu through `Paused` and `Paused — secure input` | ★ |
+| 120 | `harf --quit`, then `harf --status` from that same trusted terminal (B7) | `running no`, and both grants read `unknown` — **not** `yes` and **not** `no`. A banner says nothing is running and that the settings shown are the saved ones. `unknown` is the whole point: the terminal's own Accessibility grant must not be reported as the app's | ★ |
+| 121 | With Harf running and the settings window open on the General tab, run `harf --set sensitivity eager`, then toggle **Pause** from the menu and run `harf --status` (B5, B8) | The sensitivity control moves in the open window within a moment, with no restart and no warning on standard error. After the menu toggle, `--status` still reports `sensitivity eager` alongside `paused yes`: the menu write starts from what is on disk, so it no longer copies a stale cache over the shell's change | ★ |
+| 122 | With Harf running, type a few sentences of ordinary English first (so there are words part-way to being learned), then run `harf --words add kubectl --lang en` | The command prints `Harf is running and has taken the change.` and no warning about quitting anything. Type `kubectl` in TextEdit on the wrong layout within the next second or two: it is treated as a word this user writes. Wait a minute, run `harf --words list --lang en` again: `kubectl` is still there, and the words that were on the way have kept their counts | ★ |
+| 123 | Repeat row 122 with `harf --words remove kubectl --lang en`, then wait a full minute and run `harf --words list --lang en`; then `harf --words clear` and wait another minute | The word stays removed and `clear` stays cleared — neither comes back when the running copy next writes the file. This is the whole point: before, the running copy's own save undid any of the three within about twenty seconds | ★ |
+
 ---
 
 ## Superseded rows, and why

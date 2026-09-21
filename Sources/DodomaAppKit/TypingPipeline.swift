@@ -20,6 +20,25 @@ private struct PendingSuggestion {
     let serial: UInt64
 }
 
+/// The pipeline's `@objc` ear for the two Text Input Sources notifications.
+///
+/// `DistributedNotificationCenter`'s `suspensionBehavior` argument only exists
+/// on the selector-based registration, and an `@objc` selector target has to
+/// descend from `NSObject` — which the pipeline deliberately does not, so it
+/// gains an object rather than a superclass. It holds its owner weakly: the
+/// pipeline retains this, and the notification centre retains neither.
+private final class InputSourceNotificationTarget: NSObject {
+    weak var pipeline: TypingPipeline?
+
+    @objc func selectedInputSourceChanged(_ notification: Notification) {
+        pipeline?.selectedInputSourceChanged()
+    }
+
+    @objc func enabledInputSourcesChanged(_ notification: Notification) {
+        pipeline?.enabledInputSourcesChanged()
+    }
+}
+
 /// Thin app-side shell around `TypingSession`.
 ///
 /// Responsibilities kept here (and only here): the serial queue, the AppKit
@@ -101,6 +120,14 @@ final class TypingPipeline {
 
     /// Queue-confined state.
     private var pendingEvaluation: DispatchWorkItem?
+    /// The last refusal reported, so the same one is not reported again.
+    /// Queue-confined, like everything the evaluation reads.
+    private var skipLedger = SkipLedger()
+    /// True from the moment a refused evaluation asks the main thread to re-read
+    /// the selected input source until that answer has come back. Without it a
+    /// burst of refusals would queue a main-thread Text Input Sources
+    /// enumeration each.
+    private var isRefreshingLayout = false
     private var isApplying = false
     /// True from the moment a decision is handed to the accessibility gate
     /// until the gate resolves. Distinct from `isApplying`: nothing has been
@@ -151,8 +178,15 @@ final class TypingPipeline {
     private var undoSuppression = SuggestionSuppression()
 
     private var frontmostObserver: UUID?
-    private var inputSourceObserver: NSObjectProtocol?
-    private var enabledSourcesObserver: NSObjectProtocol?
+    /// The `@objc` ear for the two Text Input Sources notifications. Retained
+    /// here because the notification centre does not retain an observer, and it
+    /// points back weakly.
+    private let inputSourceTarget = InputSourceNotificationTarget()
+
+    private static let selectedSourceNotification = Notification.Name(
+        kTISNotifySelectedKeyboardInputSourceChanged as String)
+    private static let enabledSourcesNotification = Notification.Name(
+        kTISNotifyEnabledKeyboardInputSourcesChanged as String)
 
     /// Must be created on the main thread.
     ///
@@ -189,38 +223,54 @@ final class TypingPipeline {
             self?.frontmostChanged(to: app)
         }
 
-        let inputSourceName = Notification.Name(
-            kTISNotifySelectedKeyboardInputSourceChanged as String)
-        inputSourceObserver = DistributedNotificationCenter.default().addObserver(
-            forName: inputSourceName,
+        // The selector API rather than the block one, for its one extra
+        // argument. A distributed notification's default suspension behaviour
+        // is `.coalesce`, which holds a notification while the receiving
+        // application is *inactive* and delivers only the most recent one when
+        // it becomes active again. Harf is an LSUIElement: it is never active,
+        // so there is no such moment, and the selection notification — the only
+        // thing that tells the cache a ⌃Space happened — can be held or dropped
+        // indefinitely. `.deliverImmediately` is the whole reason this is not
+        // the block API.
+        //
+        // Delivery is still on the main thread: the distributed centre is
+        // driven by the main run loop, which is where both handlers read Text
+        // Input Sources.
+        inputSourceTarget.pipeline = self
+        let center = DistributedNotificationCenter.default()
+        center.addObserver(
+            inputSourceTarget,
+            selector: #selector(InputSourceNotificationTarget.selectedInputSourceChanged(_:)),
+            name: Self.selectedSourceNotification,
             object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            // Which layout it changed *to* is read here, on the main thread,
-            // because that is where Text Input Sources calls belong and because
-            // the undo slot cannot tell the fix's own switch from the user's
-            // without it.
-            guard let self else { return }
-            let selected = LayoutEngine.selectedLayoutID()
-            // The cache resolves the pair against the selected source, and
-            // this is the only notification that says the selection moved.
-            // Without it a ⌃Space switch is invisible until the enabled
-            // sources change, which for most people is never.
-            self.layoutEngine.noteSelectedLayout(selected)
-            self.inputSourceChanged(to: selected)
-        }
-
-        let enabledSourcesName = Notification.Name(
-            kTISNotifyEnabledKeyboardInputSourcesChanged as String)
-        enabledSourcesObserver = DistributedNotificationCenter.default().addObserver(
-            forName: enabledSourcesName,
+            suspensionBehavior: .deliverImmediately)
+        center.addObserver(
+            inputSourceTarget,
+            selector: #selector(InputSourceNotificationTarget.enabledInputSourcesChanged(_:)),
+            name: Self.enabledSourcesNotification,
             object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.layoutEngine.invalidate()
-            self?.warmLayoutCache()
-        }
+            suspensionBehavior: .deliverImmediately)
 
+        warmLayoutCache()
+    }
+
+    /// `kTISNotifySelectedKeyboardInputSourceChanged` arrived. Main thread.
+    fileprivate func selectedInputSourceChanged() {
+        // Which layout it changed *to* is read here, on the main thread,
+        // because that is where Text Input Sources calls belong and because the
+        // undo slot cannot tell the fix's own switch from the user's without it.
+        let selected = LayoutEngine.selectedLayoutID()
+        // The cache resolves the pair against the selected source, and this is
+        // the only notification that says the selection moved. Without it a
+        // ⌃Space switch is invisible until the enabled sources change, which
+        // for most people is never.
+        layoutEngine.noteSelectedLayout(selected)
+        inputSourceChanged(to: selected)
+    }
+
+    /// `kTISNotifyEnabledKeyboardInputSourcesChanged` arrived. Main thread.
+    fileprivate func enabledInputSourcesChanged() {
+        layoutEngine.invalidate()
         warmLayoutCache()
     }
 
@@ -241,6 +291,14 @@ final class TypingPipeline {
     func frontmostChanged(to app: FrontmostApp) {
         // The cached focus verdict belongs to the app that just lost focus.
         focus.invalidate()
+        // macOS remembers an input source per application, so an application
+        // switch is the *other* moment the selection moves — and this
+        // notification comes through AppKit rather than the distributed centre,
+        // so it is not subject to the coalescing that can swallow a selection
+        // change while an LSUIElement is inactive. One Text Input Sources read,
+        // no enumeration: cheap enough to do on every switch, and it keeps the
+        // cached selection honest for free most of the time.
+        layoutEngine.noteSelectedLayout(LayoutEngine.selectedLayoutID())
         submit(.appActivated(bundleID: app.bundleID, at: Self.now()))
     }
 
@@ -258,14 +316,12 @@ final class TypingPipeline {
             frontmost.removeObserver(frontmostObserver)
             self.frontmostObserver = nil
         }
-        if let inputSourceObserver {
-            DistributedNotificationCenter.default().removeObserver(inputSourceObserver)
-            self.inputSourceObserver = nil
-        }
-        if let enabledSourcesObserver {
-            DistributedNotificationCenter.default().removeObserver(enabledSourcesObserver)
-            self.enabledSourcesObserver = nil
-        }
+        let center = DistributedNotificationCenter.default()
+        center.removeObserver(
+            inputSourceTarget, name: Self.selectedSourceNotification, object: nil)
+        center.removeObserver(
+            inputSourceTarget, name: Self.enabledSourcesNotification, object: nil)
+        inputSourceTarget.pipeline = nil
         queue.async { [weak self] in
             // Clearing the flags as well as the timer: a tap event already
             // queued behind this block could otherwise arm a trigger that
@@ -470,6 +526,13 @@ final class TypingPipeline {
             return
         }
 
+        // Input the pipeline is willing to buffer is a new situation, so the
+        // last refusal is no longer the thing being reported about — the next
+        // occurrence of it deserves its own line. Deliberately not reached by
+        // input that was dropped or suppressed above: none of that arms a
+        // trigger, so none of it can produce a refusal to report.
+        skipLedger.clear()
+
         let outcome = session.handle(input)
 
         if case .appActivated = input {
@@ -515,7 +578,13 @@ final class TypingPipeline {
 
     private func armTrigger() {
         cancelTrigger()
-        guard captureActive, !isApplying, !isGating, !isSuppressed else { return }
+        if let refusal = Self.evaluationRefusal(
+            captureActive: captureActive, isApplying: isApplying, isGating: isGating,
+            isSuppressed: isSuppressed)
+        {
+            noteSkipped(refusal, phrased: "not armed")
+            return
+        }
 
         let work = DispatchWorkItem { [weak self] in
             self?.triggerFired()
@@ -532,8 +601,22 @@ final class TypingPipeline {
     private func triggerFired() {
         dispatchPrecondition(condition: .onQueue(queue))
         pendingEvaluation = nil
-        guard captureActive, !isApplying, !isGating else { return }
-        guard let last = session.lastKeyTime else { return }
+        // `isSuppressed` is deliberately not among these: a pause, a secure
+        // field or an Off app all empty the buffer on their way in, so by the
+        // time a trigger armed before them fires there is nothing left to refuse
+        // about — and reporting one would put a line on the log for every
+        // keystroke typed during a pause.
+        if let refusal = Self.evaluationRefusal(
+            captureActive: captureActive, isApplying: isApplying, isGating: isGating,
+            isSuppressed: false)
+        {
+            noteSkipped(refusal)
+            return
+        }
+        guard let last = session.lastKeyTime else {
+            noteSkipped(.nothingTyped)
+            return
+        }
 
         // A key may have landed between the last arming and this block being
         // dequeued; the timestamp is the authority, not the timer. Re-schedule
@@ -618,6 +701,14 @@ final class TypingPipeline {
         switch preflight {
         case .blocked(let reason, let resetBuffer):
             if let resetBuffer { self.resetBuffer(reason: resetBuffer) }
+            // Published *and* logged. The debug window has always shown this
+            // one; the log line is what makes it visible from outside the
+            // process, which is the whole difference between an app that is
+            // idle and one that has quietly stopped working. The reason is
+            // SafetyGate's own wording, not a `SkipReason`: it names which of
+            // the three preflight conditions blocked, which is more than
+            // `.suppressed` says.
+            noteSkipped(reason)
             publish(
                 .skipped(reason: reason, policy: resolved, bundleID: bundleID, evaluatedAt: now))
             return
@@ -625,18 +716,28 @@ final class TypingPipeline {
             policy = allowed
         }
 
-        // `cachedPair()`, not `currentPair()`: this runs on the pipeline queue,
-        // and enumerating input sources is a Text Input Sources call that
-        // belongs on the main thread. A cold cache means an enabled-sources
-        // change just invalidated it; `warmLayoutCache()` always repopulates on
-        // the main thread after an invalidation, so the next quiet period will
-        // have a warm cache. Skip this one rather than enumerate off-main.
-        guard let pair = layoutEngine.cachedPair() else {
-            // Re-armed like the three abandon paths below it: nothing about
-            // this buffer was decided, and without another trigger a word
-            // typed across a sources change is never looked at again until the
-            // user types more.
-            if !session.isBufferEmpty { armTrigger() }
+        // The cache, not `currentPair()`: this runs on the pipeline queue, and
+        // enumerating input sources is a Text Input Sources call that belongs on
+        // the main thread.
+        guard let pair = currentLayoutPair() else {
+            // The two-day bug. This branch used to re-arm unconditionally and
+            // say nothing, on the theory that a `nil` pair means a cold cache
+            // and a cold cache is always repopulated on the main thread a
+            // moment later. It is also what a *warm* cache with a stale
+            // selection returns — and that one never heals on its own, so the
+            // re-arm became a one-second loop that ran for two days while the
+            // log stayed empty.
+            //
+            // So: say so once, show it in the debug window, and ask the main
+            // thread to re-read the selection. Re-arming is now that refresh's
+            // decision, not this one's: retrying against an unchanged refusal
+            // is the loop being replaced.
+            noteSkipped(.noLayoutPair)
+            publish(
+                .skipped(
+                    reason: SkipReason.noLayoutPair.rawValue, policy: policy, bundleID: bundleID,
+                    evaluatedAt: now))
+            refreshLayoutSelection()
             return
         }
 
@@ -651,7 +752,10 @@ final class TypingPipeline {
                 detector: detector, policy: policy, aggressiveness: settings.aggressiveness,
                 confidentScore: settings.confidentScore,
                 recentlyUndone: undoSuppression.texts(bundleID: bundleID, at: now))
-        else { return }
+        else {
+            noteSkipped(.emptyBuffer)
+            return
+        }
         let duration = Self.now() - started
 
         learnVocabulary(from: detection, using: detector)
@@ -660,11 +764,87 @@ final class TypingPipeline {
             detection: detection, policy: policy, bundleID: bundleID, duration: duration,
             evaluatedAt: now)
 
+        // The evaluation got all the way here, so whatever it last refused for
+        // is history: the next time that refusal comes round it is news again.
+        skipLedger.clear()
+
         // Deliberately not published or logged yet. The snapshot carries the
         // region — the user's own text — and the focused field has not been
         // checked. In a password field that text is a password, and §6(c) says
         // nothing is shown. `resolveGate` publishes it, or does not.
         beginGate(for: detection.decision, snapshot: snapshot, policy: policy, bundleID: bundleID)
+    }
+
+    /// The first condition, in safety order, that stops an evaluation from
+    /// happening at all — or `nil` when none of them does.
+    ///
+    /// Pure and static because the order is the interesting part and it is
+    /// asked at three different points in the chain: when the trigger is armed,
+    /// when it fires, and when the accessibility gate is about to open. Each of
+    /// those used to spell the same `guard` out for itself, so each could drift
+    /// from the others, and none of them said which condition it was that had
+    /// stopped it.
+    ///
+    /// - Parameter isSuppressed: pass `false` from a caller that deliberately
+    ///   does not check it. Only arming does; see `triggerFired()`.
+    static func evaluationRefusal(
+        captureActive: Bool, isApplying: Bool, isGating: Bool, isSuppressed: Bool
+    ) -> SkipReason? {
+        if !captureActive { return .captureInactive }
+        if isApplying { return .applyInFlight }
+        if isGating { return .gateOpen }
+        if isSuppressed { return .suppressed }
+        return nil
+    }
+
+    private func noteSkipped(_ reason: SkipReason, phrased prefix: String = "evaluation skipped") {
+        noteSkipped(reason.rawValue, phrased: prefix)
+    }
+
+    /// Says once that nothing was done, and why. Queue-confined.
+    ///
+    /// `.info`, not `.debug`: debug messages are not written to the persistent
+    /// store, which is exactly why two days of an app doing nothing left no
+    /// trace anyone could read afterwards. Nothing here is ever typed text —
+    /// every reason is a fixed string chosen from `SkipReason` or from
+    /// `SafetyGate`, which is what makes the line safe to emit unconditionally,
+    /// without the `debugLogging` opt-in a decision line needs.
+    private func noteSkipped(_ reason: String, phrased prefix: String = "evaluation skipped") {
+        dispatchPrecondition(condition: .onQueue(queue))
+        let line = "\(prefix): \(reason)"
+        guard skipLedger.shouldReport(line) else { return }
+        Log.pipeline.info("\(line, privacy: .public)")
+    }
+
+    /// Asks the main thread what the selected input source actually is, and
+    /// re-arms the evaluation only if that repaired anything. Queue-confined.
+    ///
+    /// Both hops are `async`. The menu asks this queue questions with
+    /// `queue.sync` from the main thread, so a `main.sync` from here is half of
+    /// a deadlock; and the refresh itself calls Text Input Sources, which is why
+    /// it cannot simply happen here.
+    ///
+    /// Re-arming is conditional on two things, and that is the whole difference
+    /// from the loop this replaces: the refresh has to report that the cache now
+    /// resolves to a pair, and there has to still be something in the buffer to
+    /// evaluate. A user typing with only English enabled is refused for good
+    /// reasons, and retrying that once a second forever is not a recovery
+    /// strategy.
+    private func refreshLayoutSelection() {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard !isRefreshingLayout else { return }
+        isRefreshingLayout = true
+        let refresh = layoutRefresh ?? layoutEngine.refreshSelection
+        DispatchQueue.main.async { [weak self] in
+            let repaired = refresh()
+            guard let self else { return }
+            self.queue.async { [weak self] in
+                guard let self else { return }
+                self.isRefreshingLayout = false
+                guard repaired, !self.session.isBufferEmpty else { return }
+                self.armTrigger()
+            }
+        }
     }
 
     /// Region text is typed text. It only ever reaches os_log through this
@@ -1227,7 +1407,7 @@ final class TypingPipeline {
             break
         }
 
-        guard let pair = (layoutPair ?? layoutEngine.cachedPair)() else {
+        guard let pair = currentLayoutPair() else {
             // Same rule as `evaluate()`: a cold cache is repopulated on the
             // main thread after every invalidation, and enumerating input
             // sources from here is a Text Input Sources call off-main.
@@ -1849,6 +2029,8 @@ final class TypingPipeline {
     /// The buffer no longer describes what is in front of the caret.
     private func resetBuffer(reason: ResetReason) {
         dispatchPrecondition(condition: .onQueue(queue))
+        // Nothing that was refused was refused about this buffer any more.
+        skipLedger.clear()
         if reason.purgesHistory {
             // The undo slot holds the user's own text, both halves of it.
             // Whatever made the buffer unkeepable — a password field, so far —
@@ -1875,6 +2057,27 @@ final class TypingPipeline {
     /// a test of the cold-cache refusal. The committed `uchr` fixtures go in
     /// here instead.
     var layoutPair: (() -> (english: KeyboardLayout, arabic: KeyboardLayout)?)?
+
+    /// What a refused evaluation calls to have the selection re-read, and
+    /// whether that repaired anything. Nil — the normal case — means the shared
+    /// cache's own refresh, on the main thread.
+    ///
+    /// Overridden for the same reason as `layoutPair`, plus one: the real
+    /// refresh would answer from the input sources of whichever machine runs
+    /// the suite, so whether the recovery re-arms would depend on the tester's
+    /// System Settings rather than on the code.
+    var layoutRefresh: (() -> Bool)?
+
+    /// The pair the evaluation and the flip both resolve against, from the seam
+    /// when a test installed one and from the shared cache otherwise.
+    ///
+    /// One accessor rather than the expression spelled out at both call sites:
+    /// they are the two places that refuse when there is no usable pair, and
+    /// only one of them was reachable from a test while the other read the cache
+    /// directly — which is why the refusal that mattered had no test at all.
+    private func currentLayoutPair() -> (english: KeyboardLayout, arabic: KeyboardLayout)? {
+        (layoutPair ?? layoutEngine.cachedPair)()
+    }
 
     /// Raises an offer for `fix` as though the detector had just produced one.
     /// Queue-confined.

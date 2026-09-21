@@ -48,6 +48,16 @@ final class CLIParseTests: XCTestCase {
         XCTAssertEqual(CLI.parse(["--quit"]), .quit)
     }
 
+    /// Talking to the running copy — asking it for its state, asking it to
+    /// re-read the settings — added no flags and no arguments. It is something
+    /// the existing commands now do on their way through, and the two commands
+    /// that talk to it the most have to keep parsing exactly as they did.
+    func testStatusAndQuitStillParseWithNoExtraArguments() {
+        XCTAssertEqual(CLI.parse(["--status"]), .status)
+        XCTAssertEqual(CLI.parse(["--quit"]), .quit)
+        XCTAssertEqual(CLI.parse(["--status"], isBundled: false), .status)
+    }
+
     // MARK: - How wide the typo net is
 
     /// Nothing hands arguments to the unbundled executable except a person at

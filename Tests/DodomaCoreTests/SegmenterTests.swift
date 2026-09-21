@@ -48,7 +48,10 @@ final class SegmenterTests: XCTestCase {
         XCTAssertEqual(region.typedText, "HC MV; HKH HSMDIH HGDML")
         XCTAssertEqual(region.tokenCount, 5)
         XCTAssertEqual(region.completedTokenCount, 4)
-        XCTAssertEqual(region.letterCount, 18)
+        // Nineteen rather than the eighteen Latin letters on screen: the
+        // semicolon is ك under the reading being offered, and the count is of
+        // the longer of the two. See `CandidateRegion.letterCount`.
+        XCTAssertEqual(region.letterCount, 19)
     }
 
     /// Regression: a real word of the current language used to end the region.
@@ -227,4 +230,66 @@ final class SegmenterTests: XCTestCase {
         XCTAssertEqual(region.typedText, "hkh hsmdih")
     }
 
+    // MARK: - Letters under the reading being offered
+
+    /// Regression: an Arabic word was three letters long because of a bracket.
+    ///
+    /// حراج typed with the US layout selected is `pnh[`, and `[` is the key ج
+    /// sits on. Counting only the typed reading made the region three letters,
+    /// under `suggestMinLetters`, so the verdict was `ignore (letterCount 3 <
+    /// 4)` for a word the Arabic dictionary knows outright.
+    func testAnArabicWordOnAPunctuationKeyIsCountedUnderTheOtherReading() throws {
+        let fixture = try DetectorFixture.make()
+        let region = try XCTUnwrap(fixture.segment(try fixture.latinKeys("pnh[ ")))
+
+        XCTAssertEqual(region.typedText, "pnh[ ")
+        XCTAssertEqual(region.letterCount, 4, "حراج is four letters however it was typed")
+    }
+
+    /// And the verdict that follows from it. Balanced defaults, so this is what
+    /// somebody typing that word actually gets: a card rather than silence.
+    /// Not an automatic fix — one short token still raises `shortSingleToken`,
+    /// which is the gate that keeps a lone word from being rewritten without
+    /// asking.
+    ///
+    /// حراج is a word this user writes rather than one the subtitle corpus
+    /// carries, so it arrives the way it arrives in life: through the lexicon.
+    func testThatWordIsOfferedRatherThanPassedOver() throws {
+        let fixture = try DetectorFixture.make()
+        let lexicon = UserLexicon(url: nil)
+        lexicon.add("حراج", language: .arabic)
+        fixture.detector.arabicModel.lexicon = lexicon
+        defer { fixture.detector.arabicModel.lexicon = nil }
+
+        let detection = try XCTUnwrap(fixture.detect("pnh[ "))
+
+        guard case .suggest(let fix) = detection.decision else {
+            return XCTFail("expected a suggestion, got \(detection.decision)")
+        }
+        XCTAssertEqual(fix.insertText, "حراج ")
+    }
+
+    /// The same rule read from the other side. English typed on the Arabic
+    /// layout puts every Latin letter on an Arabic one, so the typed reading is
+    /// already the longer of the two and the count is the one it always was.
+    func testEnglishWithTrailingPunctuationOnTheArabicLayoutKeepsItsCount() throws {
+        let fixture = try DetectorFixture.make()
+        let keys = try fixture.arabicKeys("قثحخقفك ")
+        let region = try XCTUnwrap(fixture.segment(keys, typedLanguage: .arabic))
+
+        XCTAssertEqual(region.letterCount, 7, "ك is the semicolon of `report;`")
+        let detection = try XCTUnwrap(fixture.detect("قثحخقفك ", typedLanguage: .arabic))
+        XCTAssertEqual(detection.decision.fix?.insertText, "report; ")
+    }
+
+    /// The length gate is the only thing that moved. Text that is not prose is
+    /// refused by the guards, which read the typed text on their own terms — so
+    /// a bracket run that now counts four letters is still left alone.
+    func testPunctuationAndLocatorsAreStillRefused() throws {
+        let fixture = try DetectorFixture.make()
+        for text in ["[][] ", "http://ex.com/a ", "user_name ", "see /usr/local/bin "] {
+            let detection = try XCTUnwrap(fixture.detect(text), text)
+            XCTAssertNil(detection.decision.fix, "\(text) → \(detection.decision)")
+        }
+    }
 }

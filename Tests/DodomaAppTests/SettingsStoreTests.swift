@@ -151,6 +151,103 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(changes, 0)
     }
 
+    // MARK: - Re-reading what somebody else wrote
+
+    /// Writes the blob behind the store's back, the way `harf --set` in another
+    /// process does. Not through a second `SettingsStore`, because that would
+    /// also exercise the seed merge and the corrupt-blob rescue; this is only
+    /// the bytes arriving.
+    private func externalWrite(_ body: (inout AppSettings) -> Void) throws {
+        var settings = AppSettings.defaults
+        body(&settings)
+        defaults.set(try JSONEncoder().encode(settings), forKey: SettingsStore.Key.settings)
+    }
+
+    /// The defect behind `harf --set paused yes` doing nothing to a running app:
+    /// the store cached at init and never looked again.
+    func testReloadPicksUpAnExternalWriteAndAnnouncesItOnce() throws {
+        let store = makeStore()
+        var seen: [AppSettings] = []
+        store.onChange = { seen.append($0) }
+
+        try externalWrite { $0.aggressiveness = .eager }
+
+        XCTAssertTrue(store.reload())
+        XCTAssertEqual(store.settings.aggressiveness, .eager)
+        XCTAssertEqual(seen.count, 1)
+        XCTAssertEqual(seen.last?.aggressiveness, .eager)
+    }
+
+    /// The reload message is fire-and-forget and cheap to send, so it is sent on
+    /// every write — including the ones that change nothing. Announcing those
+    /// would rebuild the pipeline's settings and reset the settings window's
+    /// controls for no reason.
+    func testReloadAnnouncesNothingWhenTheBlobHasNotChanged() {
+        let store = makeStore()
+        var changes = 0
+        store.onChange = { _ in changes += 1 }
+
+        XCTAssertFalse(store.reload())
+
+        XCTAssertEqual(changes, 0)
+    }
+
+    /// The fallback for an unreadable blob is the *permissive* default — not
+    /// paused, every app normal — so a reload that applied it would un-pause a
+    /// running app and switch capture back on in every application the user had
+    /// switched off. A reload has nothing to restore from and no user watching:
+    /// the only safe answer is to keep what is in memory and say so in the log.
+    func testReloadIgnoresAnUnreadableBlobRatherThanRestoringTheDefaults() {
+        let store = makeStore()
+        store.setPaused(true)
+        defaults.set(Data("not json".utf8), forKey: SettingsStore.Key.settings)
+        var changes = 0
+        store.onChange = { _ in changes += 1 }
+
+        XCTAssertFalse(store.reload())
+
+        XCTAssertTrue(store.paused, "the running copy stays paused")
+        XCTAssertEqual(changes, 0)
+        XCTAssertNil(
+            defaults.data(forKey: SettingsStore.Key.corruptSettings),
+            "a reload does not move the blob aside; only a launch does, where there is a user")
+    }
+
+    /// The other half of the same defect, and the more destructive half: a menu
+    /// write used to copy the store's stale cache and persist it, so the
+    /// external change was not merely missed, it was overwritten. Each write now
+    /// starts from what is actually on disk.
+    func testAMenuWriteAfterAnExternalWriteKeepsBoth() throws {
+        let store = makeStore()
+        try externalWrite { $0.paused = true }
+
+        store.setAggressiveness(.eager)
+
+        XCTAssertTrue(store.settings.paused)
+        XCTAssertEqual(store.settings.aggressiveness, .eager)
+        XCTAssertTrue(reloaded().paused)
+        XCTAssertEqual(reloaded().aggressiveness, .eager)
+    }
+
+    /// The inverse case, and the one that only bites now that a reload exists.
+    /// A menu write that puts a setting back to the value already in memory
+    /// changes nothing in memory — but if the blob says otherwise it has to be
+    /// written anyway, or the next reload (from any later `harf --set`) would
+    /// hand the external value back and silently undo the user's click.
+    func testAMenuWriteThatUndoesAnExternalWriteStillReachesTheBlob() throws {
+        let store = makeStore()
+        try externalWrite { $0.paused = true }
+        var changes = 0
+        store.onChange = { _ in changes += 1 }
+
+        store.setPaused(false)
+
+        XCTAssertFalse(reloaded().paused, "the blob agrees with what is in memory")
+        XCTAssertFalse(store.reload(), "so a later reload has nothing to undo")
+        XCTAssertFalse(store.paused)
+        XCTAssertEqual(changes, 0, "nothing in memory moved, so nobody is told")
+    }
+
     // MARK: - Onboarding flag
 
     func testTheOnboardingFlagStartsUnsetAndSurvivesAReload() {
