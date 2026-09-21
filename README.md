@@ -1,3 +1,11 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/harf-lockup-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/brand/harf-lockup-light.svg">
+    <img src="docs/brand/harf-lockup-light.svg" alt="Harf" width="360">
+  </picture>
+</p>
+
 # Harf
 
 Harf (حرف, "letter") is a macOS menu-bar utility that fixes text typed with the wrong keyboard
