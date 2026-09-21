@@ -12,7 +12,12 @@ carrying the accent colour.
 
 Nothing here is hand-drawn: the letterforms are glyph outlines pulled out of a
 real typeface, so switching the face is a parameter rather than a redraw. Pass
-``--font`` and every output below is rebuilt consistently.
+``--font`` and every output below is rebuilt consistently. The proportions
+below — the 58% letter, the 12pt of glyph inside an 18pt menu bar box, the
+cap height shared by both words — are rules about the artwork, not numbers
+fitted to one face; they have been checked against Thmanyah Serif Display
+Bold, Thmanyah Sans Bold and IBM Plex Sans Arabic Bold, and each one places
+the glyph inside its box with margin to spare.
 
   docs/brand/harf-icon.svg              1024 master for the .icns
   docs/brand/harf-menubar.svg           18pt template glyph, documentation copy
@@ -22,13 +27,16 @@ real typeface, so switching the face is a parameter rather than a redraw. Pass
 
 LICENCE — READ BEFORE ADDING A FONT TO THE REPOSITORY.
 
-The default face is Thmanyah Sans Bold. Its licence permits using the
-letterforms in a logo but forbids redistributing the font software, so no
-font file may ever be committed, staged or bundled. This script therefore
-reads the face from ``Tools/data/fonts/`` — which is gitignored — or from
-wherever ``--font`` points, and commits only the resulting outlines. IBM Plex
-Sans Arabic Bold (SIL OFL 1.1) is a drop-in alternative if the terms ever
-become inconvenient.
+The default face is Thmanyah Serif Display Bold. Its licence permits using
+the letterforms in a logo but forbids redistributing or modifying the font
+software, so no font file may ever be committed, staged or bundled, and no
+outline taken from it is redrawn here. This script therefore reads the face
+from ``Tools/data/fonts/`` — which is gitignored — or from wherever
+``--font`` points, and commits only the resulting outlines.
+
+Thmanyah Sans Bold, under the same licence, and IBM Plex Sans Arabic Bold,
+under SIL OFL 1.1, are both supported alternatives: pass either to ``--font``
+and everything is retraced.
 
 Because the font cannot be fetched by a script, the committed outputs are the
 source of truth: a checkout without the font still builds the app and still
@@ -58,7 +66,8 @@ from fontTools.ttLib import TTFont
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BRAND_DIR = REPO_ROOT / "docs" / "brand"
 SWIFT_OUT = REPO_ROOT / "Sources" / "DodomaAppKit" / "MenuBarGlyph.swift"
-DEFAULT_FONT = REPO_ROOT / "Tools" / "data" / "fonts" / "thmanyahsans-Bold.otf"
+DEFAULT_FONT = (REPO_ROOT / "Tools" / "data" / "fonts"
+                / "thmanyahserifdisplay-Bold.otf")
 
 # The palette, documented in docs/brand/README.md.
 CANVAS = "#0B0E13"
@@ -464,6 +473,14 @@ def icon_svg(face: Face) -> str:
 
 
 def menubar_shape(face: Face, base: Transform) -> Shape:
+    """The largest ح that fits the menu bar's optical margins.
+
+    Height first, width as the cap, which between them make the letter as
+    large as a 15×12 opening allows whichever axis binds. It matters for a
+    display face, whose ح carries a long tapered exit: the letter is wider
+    relative to its height in some faces and narrower in others, and a rule
+    that only ever matched the height would leave the narrow ones small.
+    """
     natural = shape(face, "ح", rtl=True, base=base)
     factor = MENUBAR_LETTER_HEIGHT / natural.height
     if natural.width * factor > MENUBAR_LETTER_WIDTH:

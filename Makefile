@@ -13,7 +13,7 @@ RESOURCE_BUNDLE := Harf_DodomaCore.bundle
 # in a logo but forbids redistributing the font software, so it lives outside
 # the repository in gitignored Tools/data/ — override this to retrace the
 # identity in another face.
-BRAND_FONT ?= Tools/data/fonts/thmanyahsans-Bold.otf
+BRAND_FONT ?= Tools/data/fonts/thmanyahserifdisplay-Bold.otf
 
 .PHONY: dmg build bundle sign install run test fixtures logs ngrams brand eval clean
 

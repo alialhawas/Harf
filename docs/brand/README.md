@@ -66,34 +66,44 @@ Paper does not, which is why Deep teal exists.
 Everything is generated from one font file by two commands, wrapped as:
 
 ```
-make brand BRAND_FONT=/path/to/thmanyahsans-Bold.otf
+make brand BRAND_FONT=/path/to/thmanyahserifdisplay-Bold.otf
 ```
 
 which runs `Tools/build-brand.py` (the SVGs and the generated Swift) and then
 `Tools/build-icon.swift` (the `.icns`, rasterised from `harf-icon.svg` by
-AppKit). `BRAND_FONT` defaults to `Tools/data/fonts/thmanyahsans-Bold.otf`.
-Output is deterministic: the same font and arguments produce byte-identical
-files, so a regeneration that changes nothing shows up as an empty diff.
+AppKit). `BRAND_FONT` defaults to
+`Tools/data/fonts/thmanyahserifdisplay-Bold.otf`. Output is deterministic: the
+same font and arguments produce byte-identical files, so a regeneration that
+changes nothing shows up as an empty diff.
 
 To retrace the identity in another face, point `BRAND_FONT` at it and rerun.
-Nothing downstream is hand-edited.
+Nothing downstream is hand-edited, and no proportion in the generator is
+fitted to one face: the 58% letter, the 12pt glyph in the 18pt menu bar box
+and the shared cap height all hold for Thmanyah Serif Display Bold, Thmanyah
+Sans Bold and IBM Plex Sans Arabic Bold alike.
 
 ## Licence
 
-The default face is **Thmanyah Sans Bold**. Its licence permits using the
-letterforms in a logo and forbids redistributing the font software, so:
+The default face is **Thmanyah Serif Display Bold**. Its licence permits using
+the letterforms in a logo and forbids redistributing or modifying the font
+software, so:
 
 - no font file — `.otf`, `.ttf`, `.woff`, `.woff2` — is committed to this
   repository or bundled into the app, and `Tests/DodomaAppTests/BrandPackagingTests.swift`
   fails the build if one appears under `docs/brand/`, `Resources/` or `Sources/`;
 - `Tools/data/` is gitignored, and that is where the generator expects to find
   the face;
-- only outlines are committed, which is what the licence allows.
+- only outlines are committed, which is what the licence allows, and they are
+  used as the type designer drew them. The ح of a display face has a long
+  tapered exit that thins at menu bar sizes; it is set as large as the box
+  allows and left alone rather than thickened, because redrawing the letter
+  is modifying the design.
 
 Because the font cannot be fetched by a script, the committed outputs are the
 source of truth. A checkout without the font still builds the app with its
 icon; it simply cannot regenerate the artwork.
 
-**IBM Plex Sans Arabic Bold** is the alternative face, under the SIL Open Font
-Licence 1.1. It may be redistributed, but is not needed at runtime either:
-everything ships as outlines regardless of which face drew them.
+**Thmanyah Sans Bold**, under the same licence, and **IBM Plex Sans Arabic
+Bold**, under the SIL Open Font Licence 1.1, are both supported alternatives.
+Plex may be redistributed, but is not needed at runtime either: everything
+ships as outlines regardless of which face drew them.
