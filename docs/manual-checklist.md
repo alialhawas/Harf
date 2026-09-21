@@ -147,7 +147,7 @@ which must become `اذ ودك انا اسويها اليوم`.
 | 77 | General → toggle **Pause**, then open the menu | The menu's Pause checkmark and status line agree with the switch, in both directions. Also check the reverse: toggling from the menu moves the switch in the open window | |
 | 78 | General → toggle **Start Dodoma at login** | The switch sticks. `SMAppService` may report *requires approval*, in which case the explanation line and an **Open Login Items Settings…** button appear — approve it there and the line clears within two seconds. Log out and back in to confirm Dodoma starts | |
 | 79 | Run from `build/Dodoma.app` rather than `/Applications`, toggle start-at-login, then `make clean` and log out/in | The login item points at a directory that no longer exists. This is why the README says install to /Applications first; the status should read *not found* afterwards and switching it off and on again from the installed copy must fix it | |
-| 80 | General → toggle **Debug logging** on, reproduce a fix, `make logs` | The region text appears under the `decision` category. Toggle it back off: the text stops appearing **even if you had previously run `defaults write com.ali.dodoma debugLogging -bool YES`** — the switch clears that key too | |
+| 80 | General → toggle **Debug logging** on, reproduce a fix, `make logs` | The `decision` line appears with `region=<private>` — the switch decides whether the line is emitted, not whether the text in it is readable, and the region stays redacted unless private-data logging has been turned on for the whole system. Toggle it back off: the line stops appearing **even if you had previously run `defaults write com.ali.dodoma debugLogging -bool YES`** — the switch clears that key too | |
 | 81 | Applications tab | The `All other apps` row is pinned at the top and reads Normal. Every seeded terminal and password manager is listed with its real name and icon; anything not installed on this machine shows its bundle identifier instead of a blank row | |
 | 82 | Applications → change one row's dropdown to **Off**, type the sample in that app | Nothing is captured. The change is live, with no relaunch | |
 | 83 | Applications → press the **−** button on a row you added, then reopen the window | The row is gone and that app follows the `All other apps` policy. Do the same to a **seeded** row (say Terminal) and relaunch Dodoma: **the seed comes back**, which is deliberate — deleting the row deletes the record of your decision | |
@@ -160,7 +160,7 @@ which must become `اذ ودك انا اسويها اليوم`.
 
 | # | Do | Expect | ★ |
 | --- | --- | --- | --- |
-| 88 | `defaults write com.ali.dodoma debugLogging -bool YES`, relaunch, `make logs` (T5.14) | Region text appears under the `decision` category. `make logs` passes `--debug --info`; without those the lines do not appear at all. Turn it off afterwards (row 80 is the supported way) | |
+| 88 | `defaults write com.ali.dodoma debugLogging -bool YES`, relaunch, `make logs` (T5.14) | The `decision` line appears with `region=<private>`. `make logs` passes `--debug --info`; without those the lines do not appear at all, and even with them the region is redacted. Turn it off afterwards (row 80 is the supported way) | |
 | 89 | Menu → **Quit Dodoma** (T2.15) | No hang, and `make logs` shows `event tap stopped`. This is the only end-to-end check of the event-tap teardown path | |
 | 90 | `scripts/uninstall.sh`, then reinstall | The app is gone and both grants are reset; reinstalling does not need another `make-cert.sh` run | |
 
@@ -183,12 +183,55 @@ with `pbpaste`.
 | 98 | **Slack.** Select wrong-layout text in the message box, ⌃⌘F | Replaced in place; `pbpaste` still prints `canary` | ★ |
 | 99 | **Conductor** (WebView, in the verify-skip list). Select wrong-layout text, ⌃⌘F; then type a run and press ⌃⌘F with nothing selected | The selection flips. The no-selection press is refused with a ✕: the caret cannot be verified there | |
 | 100 | **Ghostty** (no accessibility tree). Select text on the prompt line, ⌃⌘F | The selection is replaced (clipboard path: `make logs` shows the copy). `pbpaste` prints `canary` afterwards. The card appears, anchored to the pointer | ★ |
-| 101 | Ghostty with nothing selected and an empty Harf buffer, ⌃⌘F | Nothing is typed into the shell, no stray `c` reaches the prompt, and `pbpaste` is untouched | ★ |
+| 101 | Ghostty with nothing selected and an empty Harf buffer, ⌃⌘F | Nothing is typed into the shell, no stray `c` reaches the prompt, and `pbpaste` is untouched. The menu flashes ✕ and `make logs` reads `the selection went unanswered`: an application that does not answer ⌘C is no longer read as an empty selection | ★ |
 | 102 | Safari, focus a password field, ⌃⌘F | ✕. `make logs` shows the flip dropped **before** any copy; `pbpaste` is untouched | ★ |
 | 103 | ⌘⌥P (pause), then ⌃⌘F | ✕, nothing copied | |
 | 104 | Set an app to **Off**, ⌃⌘F there; set it to **Suggest only**, ⌃⌘F again | Off → ✕. Suggest only → the flip goes through | |
 | 105 | Press ⌃⌘F and **keep the chord held for two seconds** | The flip lands once the keys come up rather than refusing | ★ |
 | 106 | ⌘A a long TextEdit document, ⌃⌘F | ✕ and the document is untouched (the length cap) | ★ |
+
+
+## J. The tap, the burst and the card (whole-project review, C1-C13)
+
+Rows added by the review recorded in
+`.claude/plans/review-the-entire-projuect-cached-pie.md`. Every one of them is a
+change to what reaches the keyboard, and none of them has a seam a headless test
+can drive end to end.
+
+| # | Do | Expect | ★ |
+| --- | --- | --- | --- |
+| 107 | Type `hgsghl` and hold the last letter down for two seconds, then wait (C2) | The repeats appear on screen and `make logs` reads `typed buffer dropped: the tap missed input (autorepeat)`. Nothing is offered or rewritten afterwards until you type again — the buffer no longer claims to describe the line | ★ |
+| 108 | Auto-fix, then hold any letter down for a second, then press ⌘⌥Z (C2) | Nothing happens and the Undo item is greyed out. The repeated characters are in front of the caret, and an undo would delete those instead of the correction | ★ |
+| 109 | Provoke a tap disable — run something that saturates the input path, or `sudo log config` while typing — until `make logs` shows `event tap disabled ...; re-enabled` (C1) | The same line is followed by `typed buffer dropped: the tap missed input (timeout)`, any card on screen goes, and the Undo item is greyed out | |
+| 110 | In TextEdit, type more than 120 characters of the sample on the wrong layout without pausing for a second, then stop (C3) | No rewrite and no card. `make logs` shows `fix withheld: tooLong`; nothing is deleted. Press ⌃⌘F over the same run: `flip refused: tooLong`. The cap is 120 clusters | ★ |
+| 111 | Type `cafe` + ⌥E E (a decomposed é), then wrong-layout text after it, and wait (C4) | No rewrite and no card: `fix withheld: ambiguousCluster`. Repeat with an Arabic letter carrying a haraka and with an emoji — same outcome, nothing deleted | ★ |
+| 112 | Select `hgsghl ` in TextEdit, ⌃⌘F, then ⌘⌥Z (C4) | Both still work. The لا ligature the flip produces is a single scalar and must not be caught by row 111's rule — check a word containing لا specifically | ★ |
+| 113 | Start a fix over ~40 characters and ⌘-Tab to another application while the backspaces are running (C3, C8) | The burst stops within about ten more backspaces rather than running to the end. `make logs` shows `fix failed (frontmostChanged) after deleting N/40`; the second application is untouched | ★ |
+| 114 | Same, but type into the *same* field while the burst is running (C3) | The burst stops the same way, with `inputSinceVerification` | |
+| 115 | In an app that reads characters off key-up — a cross-platform toolkit or a terminal emulator — provoke a correction longer than 60 UTF-16 units, so it is injected as more than one chunk (A7) | The correction is inserted exactly once, with no stray character between the chunks and none after the last: the key-up now carries an explicit empty unicode string rather than the payload or a keycode-derived `a`/`ش` | ★ |
+| 116 | Open the debug window, type, close it, type again, reopen it (C10) | The window comes back empty rather than showing what was typed while it was closed. Nothing typed before it was ever opened appears in it | |
+| 117 | Get a card on screen and immediately type through it, repeatedly (C13) | The Tab key keeps working in the application underneath. The card is never left swallowing keys after it has gone | |
+| 118 | Switch layouts with ⌃Space mid-sentence, then type a wrong-layout word and wait (C11) | The word is still evaluated. Before this it was skipped and never looked at again until another key was pressed | |
+
+## K. What the command line says about the running copy
+
+Rows added with the status/reload work planned in
+`.claude/plans/url-snug-perlis.md`, and with the vocabulary edits that followed
+it. Every one of them is cross-process by nature: the command and the app are
+two processes with different permissions, different caches and different ideas
+of the time, and no headless test can put them in the same room.
+
+Run every row from a terminal that **has** been granted Accessibility — a
+terminal running `make` usually has — because that grant is exactly what used to
+make `--status` lie.
+
+| # | Do | Expect | ★ |
+| --- | --- | --- | --- |
+| 119 | With Harf running, open the menu, note the first line, then run `harf --status` (B7) | `running yes (process N)` with the pid of the running copy, `accessibility yes`, `input monitoring yes`, and a `state` line that is **the same sentence** the menu's first line shows. Repeat with the app paused (⌥⌘P) and under a password prompt: the `state` line tracks the menu through `Paused` and `Paused — secure input` | ★ |
+| 120 | `harf --quit`, then `harf --status` from that same trusted terminal (B7) | `running no`, and both grants read `unknown` — **not** `yes` and **not** `no`. A banner says nothing is running and that the settings shown are the saved ones. `unknown` is the whole point: the terminal's own Accessibility grant must not be reported as the app's | ★ |
+| 121 | With Harf running and the settings window open on the General tab, run `harf --set sensitivity eager`, then toggle **Pause** from the menu and run `harf --status` (B5, B8) | The sensitivity control moves in the open window within a moment, with no restart and no warning on standard error. After the menu toggle, `--status` still reports `sensitivity eager` alongside `paused yes`: the menu write starts from what is on disk, so it no longer copies a stale cache over the shell's change | ★ |
+| 122 | With Harf running, type a few sentences of ordinary English first (so there are words part-way to being learned), then run `harf --words add kubectl --lang en` | The command prints `Harf is running and has taken the change.` and no warning about quitting anything. Type `kubectl` in TextEdit on the wrong layout within the next second or two: it is treated as a word this user writes. Wait a minute, run `harf --words list --lang en` again: `kubectl` is still there, and the words that were on the way have kept their counts | ★ |
+| 123 | Repeat row 122 with `harf --words remove kubectl --lang en`, then wait a full minute and run `harf --words list --lang en`; then `harf --words clear` and wait another minute | The word stays removed and `clear` stays cleared — neither comes back when the running copy next writes the file. This is the whole point: before, the running copy's own save undid any of the three within about twenty seconds | ★ |
 
 ---
 

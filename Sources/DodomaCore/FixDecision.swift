@@ -29,11 +29,13 @@ public enum AppPolicy: String, Codable, Sendable, CaseIterable {
 
 /// Score cut-offs for one aggressiveness preset.
 ///
-/// The presets shift the three automatic gates in lockstep — conservative by
+/// The presets shift every automatic gate in lockstep — conservative by
 /// +0.08 of strictness, eager by −0.06 — so there is exactly one axis to
-/// reason about. The dictionary override and the suggestion floor are shared:
-/// the override is already a near-certainty test, and a suggestion that reads
-/// worse than `suggestAlt` is not worth showing at any setting.
+/// reason about. That includes the two shortcuts, which are the gates most
+/// likely to decide a real fix: leaving them fixed meant Conservative moved
+/// the ordinary ladder while the shortcut beside it fired at Balanced's
+/// numbers. Only the suggestion floor is shared: a suggestion that reads worse
+/// than `suggestAlt` is not worth showing at any setting.
 public struct Thresholds: Equatable, Sendable {
     /// Alternate rendering must score at least this to auto-apply.
     public let autoAlt: Double
@@ -45,6 +47,24 @@ public struct Thresholds: Equatable, Sendable {
     public let suggestGap: Double
     /// Minimum alternate score to suggest.
     public let suggestAlt: Double
+
+    /// Decisive shortcut: an overwhelming alternate reading with a wide
+    /// separation, which `autoCur` must not veto.
+    ///
+    /// `autoCur` asks whether the text on screen is plausible as it stands, and
+    /// a few accidental real words inflate it: "now i can merged ths dev to
+    /// main" typed on the Arabic layout ends in وشهر, which strips to شهر —
+    /// "month" — and lifted the typed reading to 0.33 against a ceiling of 0.28
+    /// even though the English reading scored 0.84 and the separation was 0.51.
+    /// When both of those hold there is no real ambiguity left to protect.
+    public let decisiveAlt: Double
+    public let decisiveGap: Double
+
+    /// Dictionary shortcut: when the alternate rendering is almost entirely
+    /// real words and the typed text is almost entirely not, the bigram gates
+    /// are redundant.
+    public let dictOverrideAlt: Double
+    public let dictOverrideCur: Double
 
     /// Score at which a fix is taken however short the text is, or nil to
     /// leave the length rules in charge.
@@ -58,28 +78,15 @@ public struct Thresholds: Equatable, Sendable {
     /// itself; below it the length rules still apply.
     public var confidentScore: Double?
 
-    /// Decisive shortcut: an overwhelming alternate reading with a wide
-    /// separation, which `autoCur` must not veto.
-    ///
-    /// `autoCur` asks whether the text on screen is plausible as it stands, and
-    /// a few accidental real words inflate it: "now i can merged ths dev to
-    /// main" typed on the Arabic layout ends in وشهر, which strips to شهر —
-    /// "month" — and lifted the typed reading to 0.33 against a ceiling of 0.28
-    /// even though the English reading scored 0.84 and the separation was 0.51.
-    /// When both of those hold there is no real ambiguity left to protect.
-    public static let decisiveAlt = 0.78
-    public static let decisiveGap = 0.50
-
-    /// Dictionary shortcut: when the alternate rendering is almost entirely
-    /// real words and the typed text is almost entirely not, the bigram gates
-    /// are redundant.
-    public static let dictOverrideAlt = 0.80
-    public static let dictOverrideCur = 0.15
-    public static let dictOverrideTokens = 2
-
     /// Length gates, shared by every preset.
+    ///
+    /// `dictOverrideTokens` sits here rather than with the two dictionary
+    /// cut-offs because it counts tokens, not confidence: one token is too
+    /// little evidence for a dictionary argument at any aggressiveness, and
+    /// there is no score delta to shift it by.
     public static let autoMinLetters = 6
     public static let suggestMinLetters = 4
+    public static let dictOverrideTokens = 2
 
     /// Letters a region needs before the score is allowed to speak for it.
     ///
@@ -96,11 +103,14 @@ public struct Thresholds: Equatable, Sendable {
     public static let confidentMinGap = 0.45
 
     public static let balanced = Thresholds(
-        autoAlt: 0.62, autoCur: 0.28, autoGap: 0.40, suggestGap: 0.18, suggestAlt: 0.45)
+        autoAlt: 0.62, autoCur: 0.28, autoGap: 0.40, suggestGap: 0.18, suggestAlt: 0.45,
+        decisiveAlt: 0.78, decisiveGap: 0.50, dictOverrideAlt: 0.80, dictOverrideCur: 0.15)
     public static let conservative = Thresholds(
-        autoAlt: 0.70, autoCur: 0.20, autoGap: 0.48, suggestGap: 0.26, suggestAlt: 0.45)
+        autoAlt: 0.70, autoCur: 0.20, autoGap: 0.48, suggestGap: 0.26, suggestAlt: 0.45,
+        decisiveAlt: 0.86, decisiveGap: 0.58, dictOverrideAlt: 0.88, dictOverrideCur: 0.07)
     public static let eager = Thresholds(
-        autoAlt: 0.56, autoCur: 0.34, autoGap: 0.34, suggestGap: 0.12, suggestAlt: 0.45)
+        autoAlt: 0.56, autoCur: 0.34, autoGap: 0.34, suggestGap: 0.12, suggestAlt: 0.45,
+        decisiveAlt: 0.72, decisiveGap: 0.44, dictOverrideAlt: 0.74, dictOverrideCur: 0.21)
 
     /// The same cut-offs with a confidence threshold attached.
     public func withConfidentScore(_ score: Double?) -> Thresholds {
@@ -291,7 +301,14 @@ public enum FixDecision {
         // ordinary rules. Only the shortness veto is waived: a URL, a path, an
         // identifier or a recently undone fix still blocks, because those say
         // the text is not prose at all rather than that it is merely brief.
+        //
+        // A finished token is still required. The score is read from what has
+        // been typed so far, and a three-letter fragment of a word the user is
+        // in the middle of scores as a certainty about the wrong word — a
+        // rewrite there lands under the caret mid-keystroke and switches the
+        // layout out from under the rest of the word.
         if policy == .normal,
+           completedOK,
            let confident = thresholds.confidentScore,
            alternate.combined >= confident,
            gap >= Thresholds.confidentMinGap,
@@ -307,12 +324,12 @@ public enum FixDecision {
                 && current.combined <= thresholds.autoCur
                 && gap >= thresholds.autoGap
             let dictOverride =
-                alternate.dictCoverage >= Thresholds.dictOverrideAlt
+                alternate.dictCoverage >= thresholds.dictOverrideAlt
                 && region.tokenCount >= Thresholds.dictOverrideTokens
-                && current.dictCoverage <= Thresholds.dictOverrideCur
+                && current.dictCoverage <= thresholds.dictOverrideCur
             let decisive =
-                alternate.combined >= Thresholds.decisiveAlt
-                && gap >= Thresholds.decisiveGap
+                alternate.combined >= thresholds.decisiveAlt
+                && gap >= thresholds.decisiveGap
             if scoresOK || dictOverride || decisive { return .autoApply(fix) }
         }
 

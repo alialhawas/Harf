@@ -43,4 +43,50 @@ final class CLIParseTests: XCTestCase {
             return XCTFail("--lang must not be read as an unknown option")
         }
     }
+
+    func testQuitIsACommandLikeAnyOther() {
+        XCTAssertEqual(CLI.parse(["--quit"]), .quit)
+    }
+
+    /// Talking to the running copy — asking it for its state, asking it to
+    /// re-read the settings — added no flags and no arguments. It is something
+    /// the existing commands now do on their way through, and the two commands
+    /// that talk to it the most have to keep parsing exactly as they did.
+    func testStatusAndQuitStillParseWithNoExtraArguments() {
+        XCTAssertEqual(CLI.parse(["--status"]), .status)
+        XCTAssertEqual(CLI.parse(["--quit"]), .quit)
+        XCTAssertEqual(CLI.parse(["--status"], isBundled: false), .status)
+    }
+
+    // MARK: - How wide the typo net is
+
+    /// Nothing hands arguments to the unbundled executable except a person at
+    /// a shell, so a single dash there is a typo as plainly as a double one.
+    /// Without this it fell through to the general usage block, which does not
+    /// mention what was typed.
+    func testASingleDashTypoIsCaughtWhenNotRunningFromTheBundle() {
+        XCTAssertEqual(
+            CLI.parse(["-status"], isBundled: false), .unknown(argument: "-status"))
+    }
+
+    /// The same for a missing dash: `harf status` is a guess at the interface,
+    /// and it deserves the answer that names it.
+    func testAnArgumentWithNoDashIsCaughtWhenNotRunningFromTheBundle() {
+        XCTAssertEqual(CLI.parse(["status"], isBundled: false), .unknown(argument: "status"))
+    }
+
+    /// And none of it applies to the bundle, because macOS is what passes it
+    /// arguments: -psn_0_…, -NSDocumentRevisionsDebugMode, a file path on an
+    /// open-with. Refusing to start over one would be a worse bug than the one
+    /// the net exists for.
+    func testTheBundleKeepsStartingOnMacOSsOwnArguments() {
+        XCTAssertNil(CLI.parse(["-psn_0_1234567"], isBundled: true))
+        XCTAssertNil(CLI.parse(["-NSDocumentRevisionsDebugMode", "YES"], isBundled: true))
+    }
+
+    /// No arguments is still no arguments either way; the net only catches what
+    /// was actually typed.
+    func testNoArgumentsIsNotATypoEvenUnbundled() {
+        XCTAssertNil(CLI.parse([], isBundled: false))
+    }
 }

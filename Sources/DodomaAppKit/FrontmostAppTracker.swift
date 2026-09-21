@@ -49,8 +49,12 @@ final class FrontmostAppTracker {
     private var cached = FrontmostApp()
     private var lastNonSelf = FrontmostApp()
 
-    /// Main-thread only.
-    private var observers: [UUID: (FrontmostApp) -> Void] = [:]
+    /// Main-thread only, and an array rather than a dictionary so the fan-out
+    /// runs in registration order. Two of these handlers act on the same
+    /// switch — the pipeline resets its buffer, the secure-input monitor
+    /// refreshes its flag — and a `Dictionary` hands them out in hash order,
+    /// which is to say in whichever order the run happens to produce.
+    private var observers: [(token: UUID, handler: (FrontmostApp) -> Void)] = []
     private var observer: NSObjectProtocol?
 
     private let selfPID = ProcessInfo.processInfo.processIdentifier
@@ -130,21 +134,21 @@ final class FrontmostAppTracker {
     func addObserver(_ handler: @escaping (FrontmostApp) -> Void) -> UUID {
         assert(Thread.isMainThread)
         let token = UUID()
-        observers[token] = handler
+        observers.append((token: token, handler: handler))
         return token
     }
 
     /// Main thread only.
     func removeObserver(_ token: UUID) {
         assert(Thread.isMainThread)
-        observers[token] = nil
+        observers.removeAll { $0.token == token }
     }
 
     // MARK: - Writing
 
     private func activated(_ app: FrontmostApp) {
         store(app)
-        for handler in observers.values { handler(app) }
+        for observer in observers { observer.handler(app) }
     }
 
     private func store(_ app: FrontmostApp) {

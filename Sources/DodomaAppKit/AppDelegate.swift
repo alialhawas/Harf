@@ -39,6 +39,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var flipController: FlipController?
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
+        // The first thing written anywhere by a copy that is going to keep
+        // running. The single-copy check is already behind us — `main.swift`
+        // runs it before this object is constructed, because constructing it
+        // touches `SettingsStore.shared`, which writes to the settings suite
+        // the running copy shares — so a copy that stood down never logs a
+        // start it did not make.
         Log.app.info("Harf \(DodomaCore.Dodoma.version, privacy: .public) starting")
 
         preloadLanguageModels()
@@ -178,6 +184,31 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             pipeline?.apply(updated)
             settingsWindow?.settingsChanged(updated)
         }
+        // The third way the settings can change: `harf --set` in another
+        // process. It writes the blob and asks this copy to re-read it over the
+        // single-instance port, and the reply lands in the same `onChange` above
+        // — so a change made from a shell moves the pipeline and the settings
+        // window exactly as a menu click does. The hook lives in `RuntimeStatus`
+        // because the port callback is a C function pointer and can reach a
+        // static and nothing else.
+        //
+        // Republished at once rather than on the next poll: the `harf --set`
+        // that asked for the reload is usually followed by a `harf --status`
+        // within the second, and a snapshot up to two seconds old would tell it
+        // — wrongly — that the saved settings and the running copy disagree.
+        RuntimeStatus.setReloadHandler { [weak self] in
+            guard let self, self.settings.reload() else { return }
+            self.refreshPermissions()
+        }
+        // And the fourth: `harf --words` in another process. It writes
+        // `lexicon.json` and sends the same kind of nudge, which the lexicon
+        // answers by merging the file into the words it is already using
+        // rather than by taking it wholesale — the session's own counting is
+        // in memory and nowhere else. Without this the edit had a twenty-second
+        // fuse: the app's next save wrote its own copy straight back over it.
+        RuntimeStatus.setVocabularyHandler { [weak self] in
+            self?.lexicon.reloadSoon()
+        }
         controller.onPauseChanged = { [weak self] _ in
             self?.refreshPermissions()
         }
@@ -240,6 +271,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     public func applicationWillTerminate(_ notification: Notification) {
         // What was learned this session outlives it.
         pipeline?.lexicon.save()
+
+        // The port can still take a message while the app is going down. With
+        // the handlers cleared a late reload does nothing instead of reaching
+        // into a half-torn-down pipeline.
+        RuntimeStatus.setReloadHandler(nil)
+        RuntimeStatus.setVocabularyHandler(nil)
 
         pollTimer?.invalidate()
         pollTimer = nil
@@ -314,6 +351,31 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // pipeline, which is the part with a deadline.
         onboardingWindowController?.update(permissions: state)
         settingsWindowController?.poll()
+
+        // What `harf --status` reads out of this process over the
+        // single-instance port. Published here because this method already
+        // computes every field on its own two-second poll, and published
+        // *above* the change guard below on purpose: below it, the snapshot
+        // would only ever be written when the grants or the capture state
+        // moved, so a paused app or a changed setting would be reported as
+        // whatever was true the last time a permission changed — a snapshot
+        // frozen days ago, which is the exact failure this whole feature exists
+        // to end.
+        RuntimeStatus.publish(
+            RuntimeSnapshot(
+                appVersion: DodomaCore.Dodoma.version,
+                pid: ProcessInfo.processInfo.processIdentifier,
+                permissions: state,
+                capturing: capturing,
+                paused: settings.paused,
+                secureInput: secureInput.isEnabled,
+                degraded: tapDegraded,
+                // One launchd round trip every two seconds. It is the same call
+                // the settings window makes while it is open, and the answer
+                // changes outside the app — a user can approve or revoke the
+                // login item in System Settings — so there is nothing to cache.
+                loginItem: LoginItem.status,
+                settings: settings.settings))
 
         guard state != lastState || capturing != lastCapturing else { return }
         lastState = state

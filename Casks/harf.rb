@@ -14,6 +14,11 @@ cask "harf" do
   # --status` works without shipping a second executable.
   binary "#{appdir}/Harf.app/Contents/MacOS/Harf", target: "harf"
 
+  # Harf holds a keyboard event tap. Deleting the bundle under a running copy
+  # leaves it tapping the keyboard with no app behind it, and the last 20
+  # seconds of learned vocabulary are never flushed. Quit it first.
+  uninstall quit: "com.ali.dodoma"
+
   # Deliberately does not tell anyone to pass --no-quarantine. That flag
   # switches Gatekeeper off for the install, and this app asks for the two most
   # powerful grants macOS has; teaching the habit is worse than the one-time
@@ -35,9 +40,24 @@ cask "harf" do
 
     Neither is optional; the app cannot work with only one. It is open
     source: read what it does before you grant them.
+
+    Before uninstalling, switch start-at-login off under Harf's own
+    Settings > General. Only the running app can unregister itself with
+    SMAppService, so removing the bundle first strands the login item. It
+    is harmless — it points at a bundle that is gone — and can be deleted
+    under System Settings > General > Login Items.
+
+    `brew uninstall --cask alialhawas/harf/harf` leaves your preferences and
+    your learned words behind. Add `--zap` to remove those too.
   CAVEATS
 
+  # --zap territory: everything the app writes outside its own bundle. The
+  # first entry is the learned-word file, the only thing here derived from what
+  # was typed, so it is the one that most needs to go on request.
   zap trash: [
+    "~/Library/Application Support/Harf",
+    "~/Library/Caches/com.ali.dodoma",
     "~/Library/Preferences/com.ali.dodoma.plist",
+    "~/Library/Saved Application State/com.ali.dodoma.savedState",
   ]
 end

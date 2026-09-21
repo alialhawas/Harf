@@ -14,33 +14,16 @@ import XCTest
 /// the seam they do not cover.
 final class AutoApplyFlowTests: XCTestCase {
     private var harness: PipelineHarness!
-    private let lock = NSLock()
-    private var decisions: [DecisionSnapshot] = []
 
     override func setUp() {
         super.setUp()
         harness = PipelineHarness()
         harness.oracle.answer(caret: Fixtures.caretBeforeFix)
-        harness.pipeline.onDecision = { [weak self] snapshot in
-            guard let self else { return }
-            self.lock.lock()
-            self.decisions.append(snapshot)
-            self.lock.unlock()
-        }
     }
 
     override func tearDown() {
         harness = nil
-        lock.lock()
-        decisions.removeAll()
-        lock.unlock()
         super.tearDown()
-    }
-
-    private var lastDecision: DecisionSnapshot? {
-        lock.lock()
-        defer { lock.unlock() }
-        return decisions.last
     }
 
     /// The whole happy path: the fix reaches the injector, is reported as an
@@ -59,8 +42,8 @@ final class AutoApplyFlowTests: XCTestCase {
         XCTAssertTrue(harness.offers.isEmpty, "the auto path does not raise a suggestion")
         XCTAssertEqual(harness.undoAppliedCount, 0, "and it is not an undo")
 
-        XCTAssertEqual(lastDecision?.verdict, "autoApply")
-        XCTAssertEqual(lastDecision?.result, "applied", "the `.auto` ApplyKind label")
+        XCTAssertEqual(harness.lastDecision?.verdict, "autoApply")
+        XCTAssertEqual(harness.lastDecision?.result, "applied", "the `.auto` ApplyKind label")
     }
 
     /// A successful auto-apply is undoable, exactly like an accepted suggestion:
@@ -103,5 +86,66 @@ final class AutoApplyFlowTests: XCTestCase {
         XCTAssertTrue(harness.engine.applied.isEmpty, "nothing was deleted")
         XCTAssertEqual(harness.offers.count, 1, "it was offered instead")
         XCTAssertEqual(harness.offers.first, Fixtures.fix)
+    }
+}
+
+// MARK: - Spans the burst may not be counted against
+
+/// The cap and the cluster rule, at the end of the pipeline that produces
+/// fixes rather than in the injector that posts them. A fix refused here is
+/// never offered either, so the user is not shown a card for a rewrite that can
+/// only end in a ✕.
+extension AutoApplyFlowTests {
+    private func fix(replacing text: String) -> Fix {
+        Fix(
+            deleteCount: text.count,
+            insertText: "x",
+            targetLayoutID: Fixtures.arabic,
+            sourceLayoutID: Fixtures.english,
+            replacedText: text,
+            capsMode: .asTyped)
+    }
+
+    func testAFixLongerThanTheCapIsNeitherAppliedNorOffered() {
+        let long = String(repeating: "a", count: TextGuards.maximumDeleteCount + 1)
+        harness.oracle.answer(caret: .value(long))
+        harness.autoApply(fix(replacing: long))
+
+        XCTAssertTrue(harness.engine.applied.isEmpty)
+        XCTAssertTrue(harness.offers.isEmpty)
+        XCTAssertEqual(harness.rejectionCount, 0, "nobody asked for it, so nothing flashes")
+    }
+
+    /// A cluster of more than one scalar is one whose removal is not one
+    /// backspace everywhere, and the caret verification counts in UTF-16 while
+    /// `deleteCount` counts clusters.
+    func testAFixOverACombinedClusterIsNeitherAppliedNorOffered() {
+        let text = "cafe\u{0301} "
+        harness.oracle.answer(caret: .value(text))
+        harness.autoApply(fix(replacing: text))
+
+        XCTAssertTrue(harness.engine.applied.isEmpty)
+        XCTAssertTrue(harness.offers.isEmpty)
+    }
+
+    /// The undo deletes what the fix typed, which is a different span from the
+    /// one the fix itself was checked for.
+    func testAnUndoOverACombinedClusterIsRefused() {
+        let applied = Fix(
+            deleteCount: 3,
+            insertText: "\u{1F468}\u{200D}\u{1F4BB}",
+            targetLayoutID: Fixtures.arabic,
+            sourceLayoutID: Fixtures.english,
+            replacedText: "abc",
+            capsMode: .asTyped)
+        harness.oracle.answer(caret: .value("abc"))
+        harness.autoApply(applied)
+        XCTAssertEqual(harness.engine.applied.count, 1, "precondition: the fix went through")
+        harness.waitForApplyTail(self)
+
+        harness.undo()
+
+        XCTAssertEqual(harness.engine.applied.count, 1, "no burst was posted")
+        XCTAssertEqual(harness.rejectionCount, 1, "the user asked, so the refusal is shown")
     }
 }

@@ -2,7 +2,15 @@ import ApplicationServices
 import Foundation
 import IOKit.hid
 
-struct PermissionState: Equatable {
+/// The two privacy grants, as one value.
+///
+/// `Codable` because it crosses a process boundary: `harf --status` asks the
+/// running copy for its grants rather than reading its own, since
+/// `Permissions.current()` answers for whichever process calls it and a command
+/// run from a trusted terminal inherits that terminal's grants — which is how
+/// `--status` came to report `accessibility yes` while the app itself was
+/// logging `accessibility=false`.
+struct PermissionState: Codable, Equatable {
     var accessibility: Bool
     var inputMonitoring: Bool
 }

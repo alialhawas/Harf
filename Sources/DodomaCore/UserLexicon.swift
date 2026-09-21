@@ -12,6 +12,13 @@ import Foundation
 /// stands, the words in it are evidence about this person's vocabulary, and a
 /// word seen often enough is promoted to a real one. Manual entries skip the
 /// counting for the cases learning cannot reach.
+///
+/// Only the promoted and the hand-added ever reach disk. A word still counting
+/// has changed no score and is nothing but a record that this person typed it,
+/// so it lives in memory for as long as the app is running and no longer. The
+/// price is that ten sightings have to happen in one session; the alternative
+/// was a file of everything unusual anybody had typed near the app, written
+/// twenty seconds after the first sighting.
 public final class UserLexicon: @unchecked Sendable {
     /// Sightings before a word counts. High enough that a one-off wrong-layout
     /// run that slipped past the detector never reaches it.
@@ -29,7 +36,7 @@ public final class UserLexicon: @unchecked Sendable {
     /// Ceiling on remembered words per language; the rarest are dropped first.
     public static let capacity = 8_000
 
-    private struct Store: Codable {
+    private struct Store: Codable, Equatable {
         var counts: [String: Int] = [:]
         var manual: [String] = []
     }
@@ -38,15 +45,23 @@ public final class UserLexicon: @unchecked Sendable {
     private let ioQueue = DispatchQueue(label: "com.ali.dodoma.lexicon", qos: .utility)
     private var lastSaved: Date?
     private var stores: [String: Store] = [:]
+    /// What the file held the last time this process read or wrote it.
+    ///
+    /// The third point of reference a merge needs. Two processes hold the same
+    /// vocabulary and neither can see the other's memory, so "in the file but
+    /// not in mine" is ambiguous on its own — it is either a word the other
+    /// process just added or one this process removed a moment ago — and so is
+    /// the reverse. Against what the file said last, both become unambiguous:
+    /// whichever side moved away from it is the side that changed.
+    private var baseline: [String: Store] = [:]
     private var dirty = false
     private let url: URL?
 
     public init(url: URL? = nil) {
         self.url = url
-        if let url, let data = try? Data(contentsOf: url),
-           let decoded = try? JSONDecoder().decode([String: Store].self, from: data)
-        {
+        if let url, case .contents(let decoded) = Self.read(url) {
             stores = decoded
+            baseline = decoded
         }
     }
 
@@ -218,8 +233,22 @@ public final class UserLexicon: @unchecked Sendable {
     @discardableResult
     public func save() -> Bool {
         lock.lock()
-        guard dirty, let url else { lock.unlock(); return false }
-        let snapshot = stores
+        let pending = dirty
+        lock.unlock()
+        guard pending, let url else { return false }
+
+        // Whatever another process wrote since this one last looked is folded
+        // in before anything is written back, because this is the write that
+        // would otherwise lose it: `harf --words add` edits the file, and a
+        // save landing between that edit and the message announcing it used to
+        // put the in-memory copy straight over the top. Read off the lock —
+        // the file runs to thousands of words and decoding it under the lock
+        // would put the typing queue's `contains` behind it.
+        let disk = Self.read(url)
+        lock.lock()
+        adopt(disk)
+        guard dirty else { lock.unlock(); return false }
+        let snapshot = Self.persisted(stores)
         dirty = false
         lock.unlock()
 
@@ -235,6 +264,11 @@ public final class UserLexicon: @unchecked Sendable {
             attributes: [.posixPermissions: 0o700])
         guard (try? data.write(to: url, options: .atomic)) != nil else { return false }
         try? manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        // Only now, and only on a write that happened: a baseline claiming the
+        // file holds something it does not would read the next merge backwards.
+        lock.lock()
+        baseline = snapshot
+        lock.unlock()
         return true
     }
 
@@ -245,10 +279,135 @@ public final class UserLexicon: @unchecked Sendable {
     public func clear() {
         lock.lock()
         stores = [:]
+        baseline = [:]
         dirty = false
         let path = url
         lock.unlock()
         if let path { try? FileManager.default.removeItem(at: path) }
+    }
+
+    // MARK: - An edit made in another process
+
+    /// Folds an edit another process made to the file into what is held here.
+    ///
+    /// `harf --words add`, `remove` and `clear` write the file and then ask the
+    /// running copy — over the single-instance port — to call this. Without it
+    /// the app's own copy was authoritative by accident: the file changed, the
+    /// app knew nothing about it, and its next save wrote the old vocabulary
+    /// back over the new one within about twenty seconds.
+    ///
+    /// A merge rather than a reload, because the two copies know different
+    /// things and both are right. The file carries the edit; memory carries
+    /// every sighting counted since the last save, including the ones still
+    /// short of the threshold, which are never written at all. Taking the file
+    /// wholesale would throw a session of counting away to add one word.
+    ///
+    /// - Returns: whether anything moved, so a caller can log it.
+    @discardableResult
+    public func reload() -> Bool {
+        guard let url else { return false }
+        let disk = Self.read(url)
+        lock.lock(); defer { lock.unlock() }
+        return adopt(disk)
+    }
+
+    /// The same, on the queue this type already owns for touching the file.
+    ///
+    /// What the port callback calls. It runs on the app's main run loop, where
+    /// reading and decoding the file is exactly the wrong thing to do, and
+    /// there is nothing to wait for: the CLI has already written the change and
+    /// does not read anything back.
+    public func reloadSoon() {
+        ioQueue.async { [weak self] in self?.reload() }
+    }
+
+    /// The file as it stands, in the three states a merge treats differently.
+    private enum OnDisk {
+        case contents([String: Store])
+        /// Not there. Either nothing has ever been written, or somebody ran
+        /// `--words clear`, which deletes it.
+        case gone
+        /// There and unreadable — mid-write, or not JSON at all. It says
+        /// nothing, so nothing is concluded from it.
+        case unreadable
+    }
+
+    private static func read(_ url: URL) -> OnDisk {
+        guard let data = try? Data(contentsOf: url) else {
+            return FileManager.default.fileExists(atPath: url.path) ? .unreadable : .gone
+        }
+        guard let decoded = try? JSONDecoder().decode([String: Store].self, from: data) else {
+            return .unreadable
+        }
+        return .contents(decoded)
+    }
+
+    /// Takes the file's side of the story. Call with the lock held.
+    @discardableResult
+    private func adopt(_ disk: OnDisk) -> Bool {
+        switch disk {
+        case .unreadable:
+            return false
+        case .gone:
+            // Deleting the file is how `clear` travels between processes, and
+            // somebody who asked for everything to go meant the words still
+            // counting too. Guarded by the baseline so that the ordinary case —
+            // a copy that has learned something and never yet saved — is not
+            // read as a clear: there the file has never existed.
+            guard !baseline.isEmpty else { return false }
+            stores = [:]
+            baseline = [:]
+            dirty = false
+            return true
+        case .contents(let current):
+            guard current != baseline else { return false }
+            stores = Self.merge(mine: stores, base: baseline, theirs: current)
+            baseline = current
+            dirty = Self.persisted(stores) != current
+            return true
+        }
+    }
+
+    /// Three-way, against what the file last said.
+    ///
+    /// Only what moved away from the baseline is taken from the file; anything
+    /// this process alone knows is left where it is. So a word added from a
+    /// shell appears, a word removed there stays removed, and neither touches
+    /// the tally of sightings this session has accumulated in memory.
+    private static func merge(
+        mine: [String: Store], base: [String: Store], theirs: [String: Store]
+    ) -> [String: Store] {
+        var merged = mine
+        for language in Set(base.keys).union(theirs.keys) {
+            let was = base[language] ?? Store()
+            let now = theirs[language] ?? Store()
+            var ours = merged[language] ?? Store()
+            for (word, count) in now.counts where was.counts[word] != count {
+                ours.counts[word] = count
+            }
+            for word in was.counts.keys where now.counts[word] == nil {
+                ours.counts[word] = nil
+            }
+            for word in now.manual where !was.manual.contains(word) {
+                if !ours.manual.contains(word) { ours.manual.append(word) }
+            }
+            for word in was.manual where !now.manual.contains(word) {
+                ours.manual.removeAll { $0 == word }
+            }
+            merged[language] = ours
+        }
+        return merged
+    }
+
+    /// What reaches disk: the promoted and the hand-added. Sub-threshold counts
+    /// stay in memory — see the type's own header — so this is also the form
+    /// memory has to be reduced to before it can be compared with the file.
+    private static func persisted(_ stores: [String: Store]) -> [String: Store] {
+        stores.mapValues {
+            Store(
+                counts: $0.counts.filter { $0.value >= promotionThreshold },
+                manual: $0.manual)
+        }
     }
 
     /// Where the file lives when the app is running normally.

@@ -70,4 +70,80 @@ final class CLIHelpTests: XCTestCase {
                 "the unknown-key error omits '\(key)'")
         }
     }
+
+    /// `--quit` is how the app is stopped, and it is quoted by the
+    /// single-instance alert, `make install`, `uninstall.sh` and the README.
+    /// A command four other things point at cannot be missing from --help.
+    func testHelpDocumentsQuit() {
+        XCTAssertTrue(CLI.helpText.contains("--quit"), CLI.helpText)
+    }
+
+    /// The header comment of `CLIConfig` claimed for months that a write from a
+    /// shell reached a running app; it did not, and nobody could have known
+    /// from the outside. Now it does, and the promise belongs where the user
+    /// reads it rather than only in a source file.
+    func testHelpSaysAChangeReachesTheRunningCopy() {
+        XCTAssertTrue(CLI.helpText.contains("reaches the running copy"), CLI.helpText)
+    }
+
+    /// The two ways past the launch rules exist for people who will only find
+    /// them if they are written down.
+    func testHelpDocumentsBothEnvironmentOverrides() {
+        XCTAssertTrue(CLI.helpText.contains("HARF_FORCE_APP"), CLI.helpText)
+        XCTAssertTrue(CLI.helpText.contains("HARF_IGNORE_INSTANCE"), CLI.helpText)
+    }
+
+    // MARK: - Messages that have to name the real problem
+
+    /// The only reading the old single message covered. It is still the right
+    /// advice when a layout really is missing.
+    func testAMissingLayoutIsReportedAsAMissingLayout() {
+        let message = CLI.layoutPairProblem(enabled: [layout("en")], selectedID: "keylayout.ABC")
+        XCTAssertTrue(message.contains("Input Sources"), message)
+    }
+
+    /// The reading that used to be reported as a missing layout on a machine
+    /// that has both: the pair is resolved against the source the user is
+    /// typing in, so a third language selected means there is nothing to
+    /// arbitrate, and "enable both layouts" sends them to a settings pane where
+    /// everything is already correct.
+    func testAThirdLanguageSelectedIsReportedAsTheSelectionNotAMissingLayout() {
+        let message = CLI.layoutPairProblem(
+            enabled: [layout("en"), layout("ar"), layout("fr")], selectedID: "keylayout.fr")
+        XCTAssertFalse(message.contains("Input Sources"), message)
+        XCTAssertTrue(message.contains("neither English nor Arabic"), message)
+    }
+
+    /// An input method carries no `uchr` table, so it never appears in the
+    /// enabled list even while it is the thing the user is typing in. That is a
+    /// third distinct reason, and it has a different fix from the other two.
+    func testASelectionWithNoLayoutTableIsReportedAsSuch() {
+        let message = CLI.layoutPairProblem(
+            enabled: [layout("en"), layout("ar")], selectedID: "inputmethod.Kotoeri")
+        XCTAssertTrue(message.contains("inputmethod.Kotoeri"), message)
+        XCTAssertTrue(message.contains("input method"), message)
+    }
+
+    /// `harf --status` through the cask's symlink is not a bundled process, so
+    /// launchd will not answer for it — while the person asking is running the
+    /// bundled copy and may well have start-at-login switched on. Saying "not
+    /// running from a bundled app" is true of the command and false of
+    /// everything the reader means by it.
+    func testTheLoginItemLineNamesTheBundleItCannotAnswerFor() {
+        let line = CLIConfig.label(.unavailable, owningBundleIdentifier: "com.ali.dodoma")
+        XCTAssertTrue(line.contains("com.ali.dodoma"), line)
+        XCTAssertTrue(line.contains("Login Items"), line)
+    }
+
+    /// `swift run` has no bundle above it at all, and there the old sentence is
+    /// exactly right.
+    func testTheLoginItemLineStillSaysUnavailableWithNoBundleAtAll() {
+        XCTAssertTrue(CLIConfig.label(.unavailable).contains("not running from a bundled app"))
+    }
+
+    private func layout(_ languageCode: String) -> KeyboardLayout {
+        KeyboardLayout(
+            sourceID: "keylayout.\(languageCode)", localizedName: languageCode,
+            languageCode: languageCode, uchrData: Data())
+    }
 }

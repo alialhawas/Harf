@@ -19,6 +19,74 @@ enum TapEvent {
     case suggestionAccept
     /// Likewise for the dismiss key.
     case suggestionDismiss
+    /// Keystrokes reached the screen without reaching the pipeline.
+    ///
+    /// Two things cause it, and they have the same consequence: the system
+    /// disabling the tap — every key pressed until it is re-enabled is invisible
+    /// here — and an autorepeat burst, which is dropped on purpose so that
+    /// holding a letter down does not flood the buffer with copies of it. Either
+    /// way the buffer has stopped describing the text in front of the caret, and
+    /// everything counted from the caret is now counted from the wrong place.
+    case tapInterrupted(reason: String)
+}
+
+/// What one raw key event means to the tap, decided without touching a
+/// `CGEvent`.
+///
+/// Pulled out of `handleKeyDown` so the order of the four filters is a thing
+/// that can be read and tested. The order is load-bearing: the panel's keys are
+/// claimed ahead of the autorepeat filter because a held-down Tab has to keep
+/// being swallowed, and Dodoma's own chords are claimed ahead of it because the
+/// undo they ask for is validated against a serial their own keystroke would
+/// otherwise move.
+enum TapKeyMeaning: Equatable {
+    /// Posted by the injector. Never anything but passed through.
+    case selfInjected
+    case suggestionAccept
+    case suggestionDismiss
+    /// One of Dodoma's own chords, on its way to Carbon.
+    case hotkey
+    /// An autorepeat that is not a delete, and so is not delivered.
+    case autorepeatDropped
+    case typing
+}
+
+extension EventTapController {
+    /// - Parameters:
+    ///   - userData: `.eventSourceUserData` of the event.
+    ///   - panelVisible: whether a suggestion card is on screen.
+    ///   - panelConsumesKeys: false once the watchdog has tripped.
+    static func meaning(
+        userData: Int64,
+        keycode: UInt16,
+        flags: KeyFlags,
+        isAutorepeat: Bool,
+        panelVisible: Bool,
+        panelConsumesKeys: Bool
+    ) -> TapKeyMeaning {
+        guard userData != injectedEventMarker else { return .selfInjected }
+
+        switch SuggestionKeys.disposition(
+            visible: panelVisible, consumesKeys: panelConsumesKeys, keycode: keycode, flags: flags)
+        {
+        case .swallowAndAccept:
+            return .suggestionAccept
+        case .swallowAndDismiss:
+            return .suggestionDismiss
+        case .pass, .dismissAndPass:
+            // Real typing either way. `dismissAndPass` differs only in that the
+            // pipeline will take the panel down when this key reaches it, which
+            // it does for every input regardless.
+            break
+        }
+
+        if Hotkeys.action(forKeycode: keycode, flags: flags) != nil { return .hotkey }
+
+        // Backspace is the exception: held-down deletes must shrink the buffer.
+        if isAutorepeat && keycode != Keycode.delete { return .autorepeatDropped }
+
+        return .typing
+    }
 }
 
 /// Owns the session-wide `CGEventTap` and pumps it on a dedicated run loop thread.
@@ -30,10 +98,20 @@ enum TapEvent {
 /// move focus in the application underneath. Nothing else is ever consumed, and
 /// the exception switches itself off if the watchdog trips.
 final class EventTapController {
-    /// Marker written into `.eventSourceUserData` of events Dodoma itself will
-    /// post in a later milestone. Events carrying it are ignored here so the
-    /// injector can never feed its own keystrokes back into the buffer.
-    static let injectedEventMarker: Int64 = 0x444F_444F
+    /// Marker written into `.eventSourceUserData` of the events Dodoma posts.
+    /// Events carrying it are ignored here so the injector can never feed its
+    /// own keystrokes back into the buffer.
+    ///
+    /// The process identifier rides in the high half. A fixed constant is a
+    /// value any other process can write, deliberately or by coincidence, and
+    /// anything that writes it makes this app deaf to a stream of real
+    /// keystrokes; it is also the same value in a second copy of Harf, whose
+    /// injection would then be invisible to this one. Read here and written in
+    /// `FixEngine.makeSource`, from this one definition.
+    static let injectedEventMarker: Int64 = {
+        let pid = Int64(ProcessInfo.processInfo.processIdentifier) & 0xFFFF_FFFF
+        return (pid << 32) | 0x444F_444F
+    }()
 
     /// Two tap disables inside this window are treated as a fault.
     private static let watchdogWindow: TimeInterval = 60
@@ -262,6 +340,12 @@ final class EventTapController {
         guard let tap = currentTap() else { return }
         CGEvent.tapEnable(tap: tap, enable: true)
 
+        // Before the watchdog arithmetic, and on every disable rather than on
+        // the second one in a minute: the tap is re-enabled above, but nothing
+        // that was typed while it was off came through here, and the pipeline
+        // has no other way to find that out.
+        deliver(.tapInterrupted(reason: cause))
+
         let now = Date().timeIntervalSinceReferenceDate
         disableTimestamps.append(now)
         disableTimestamps.removeAll { now - $0 > Self.watchdogWindow }
@@ -293,59 +377,49 @@ final class EventTapController {
 
     /// - Returns: true when the event must be swallowed.
     private func handleKeyDown(_ event: CGEvent) -> Bool {
-        guard !isSelfInjected(event) else { return false }
-
         let keycode = UInt16(truncatingIfNeeded: event.getIntegerValueField(.keyboardEventKeycode))
         let flags = KeyFlags(event.flags)
-
-        // Ahead of the autorepeat filter on purpose. A held-down accept or
-        // dismiss key has to be consumed for as long as the card is up; if the
-        // repeats were dropped here they would still be *returned* to the
-        // system, and the application underneath would receive a stream of
-        // tabs while the panel it belongs to sits on top of it.
         let panel = suggestion.snapshot
-        switch SuggestionKeys.disposition(
-            visible: panel.visible, consumesKeys: panel.consumesKeys, keycode: keycode,
-            flags: flags)
-        {
-        case .swallowAndAccept:
-            deliver(.suggestionAccept)
-            return true
-        case .swallowAndDismiss:
-            deliver(.suggestionDismiss)
-            return true
-        case .pass, .dismissAndPass:
-            // Real typing either way. `dismissAndPass` differs only in that the
-            // pipeline will take the panel down when this key reaches it, which
-            // it does for every input regardless.
-            break
-        }
 
-        // Dodoma's own chord, which Carbon is about to dispatch. The event is
-        // still passed through — the hot key machinery lives downstream of this
-        // tap and consumes it there — but it must not reach the pipeline as
-        // typing. Letting it through would bump the input serial that the undo
-        // it is asking for is then validated against, and the undo would race
-        // its own shortcut and silently abandon itself.
-        if Hotkeys.action(forKeycode: keycode, flags: flags) != nil { return false }
-
-        // Autorepeat floods the pipeline with duplicates of the same character.
-        // Backspace is the exception: held-down deletes must shrink the buffer.
-        let isAutorepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
-        if isAutorepeat && keycode != Keycode.delete { return false }
-
-        let keyboardType = UInt32(
-            truncatingIfNeeded: event.getIntegerValueField(.keyboardEventKeyboardType))
-
-        let captured = CapturedKey(
+        switch Self.meaning(
+            userData: event.getIntegerValueField(.eventSourceUserData),
             keycode: keycode,
             flags: flags,
-            producedText: Self.unicodeString(from: event),
-            keyboardType: keyboardType,
-            timestamp: Date().timeIntervalSinceReferenceDate
-        )
-        deliver(.key(captured))
-        return false
+            isAutorepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0,
+            panelVisible: panel.visible,
+            panelConsumesKeys: panel.consumesKeys)
+        {
+        case .selfInjected, .hotkey:
+            return false
+
+        case .suggestionAccept:
+            deliver(.suggestionAccept)
+            return true
+
+        case .suggestionDismiss:
+            deliver(.suggestionDismiss)
+            return true
+
+        case .autorepeatDropped:
+            // The repeats are still returned to the system, so the character
+            // arrives on screen once per repeat while the buffer stands still.
+            // Saying so costs one queued value per held key and is the
+            // difference between a buffer that is short and one that is wrong.
+            deliver(.tapInterrupted(reason: "autorepeat"))
+            return false
+
+        case .typing:
+            let keyboardType = UInt32(
+                truncatingIfNeeded: event.getIntegerValueField(.keyboardEventKeyboardType))
+
+            deliver(.key(CapturedKey(
+                keycode: keycode,
+                flags: flags,
+                producedText: Self.unicodeString(from: event),
+                keyboardType: keyboardType,
+                timestamp: Date().timeIntervalSinceReferenceDate)))
+            return false
+        }
     }
 
     private func isSelfInjected(_ event: CGEvent) -> Bool {

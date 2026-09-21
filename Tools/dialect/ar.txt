@@ -1,0 +1,26 @@
+# Gulf Arabic, curated by hand.
+#
+# The frequency list this build is otherwise drawn from comes from film
+# subtitles and news, both of which lean Modern Standard. The dialect people
+# actually type is largely absent from it: شغال, ليش and كيفك all score zero
+# on dictionary coverage, which is enough to keep a correct reading under the
+# threshold and leave wrong-layout text standing.
+#
+# Every line is normalised by the same rules as the corpus — tatweel and
+# harakat stripped, أإآٱ folded to ا, ى to ي, ة to ه — so the natural spelling
+# is what belongs here.
+#
+# One word per line. Add only words you are sure of: an entry here is shipped
+# to everyone and vouches for a reading, so a misspelling teaches the detector
+# to accept a mistake.
+
+شغال
+تبي
+تبغى
+ليش
+كيفك
+أبا
+أبي
+وش
+ابغى
+يبغى

@@ -3,6 +3,8 @@ build/
 .superpowers/
 .context/
 .DS_Store
+# Fetched word-list caches only. The hand-curated dialect supplement they are
+# merged with is tracked, under Tools/dialect/.
 Tools/data/
 __pycache__/
-build/*.dmg
+.gstack/

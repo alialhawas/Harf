@@ -62,7 +62,7 @@ private final class PreviewDelegate: NSObject, NSApplicationDelegate {
         window.makeKeyAndOrderFront(nil)
         self.window = window
 
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
 
         Timer.scheduledTimer(withTimeInterval: CardPreview.lifetime, repeats: false) { _ in
             NSApplication.shared.terminate(nil)

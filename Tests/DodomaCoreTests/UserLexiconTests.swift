@@ -72,6 +72,30 @@ final class UserLexiconTests: XCTestCase {
         XCTAssertTrue(second.contains("خوارزمية", language: .arabic))
     }
 
+    /// A word still counting has changed no score. What it would put on disk is
+    /// nothing but a record that this person typed it, so it stays in memory for
+    /// as long as the app is running and no longer.
+    func testAWordStillCountingNeverReachesDisk() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lex-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let first = UserLexicon(url: url)
+        for _ in 1..<UserLexicon.promotionThreshold {
+            first.observe(["passphrase"], language: .english)
+        }
+        first.add("kubectl", language: .english)
+        XCTAssertEqual(first.pending(.english).map(\.word), ["passphrase"], "held in memory")
+        XCTAssertTrue(first.save())
+
+        let written = try XCTUnwrap(String(data: Data(contentsOf: url), encoding: .utf8))
+        XCTAssertFalse(written.contains("passphrase"))
+        XCTAssertTrue(written.contains("kubectl"))
+
+        let second = UserLexicon(url: url)
+        XCTAssertTrue(second.pending(.english).isEmpty)
+    }
+
     /// A learned word lifts the score of text containing it, which is the only
     /// reason the lexicon exists.
     func testALearnedWordRaisesDictionaryCoverage() throws {
@@ -197,6 +221,188 @@ extension UserLexiconTests {
 
         XCTAssertFalse(lexicon.contains("pr", language: .english))
         XCTAssertTrue(lexicon.pending(.english).isEmpty)
+    }
+
+    // MARK: - An edit made in another process
+
+    /// What `harf --words` does: open the file, change one word, write it back.
+    /// A fresh lexicon every time, because the command is a process that lives
+    /// for the length of it.
+    private func shellEdit(_ url: URL, _ edit: (UserLexicon) -> Void) {
+        let cli = UserLexicon(url: url)
+        edit(cli)
+        cli.save()
+    }
+
+    private func temporaryFile() -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lex-\(UUID().uuidString).json")
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        return url
+    }
+
+    /// `harf --words add kubectl` against a running app. The word has to count
+    /// straight away, and the session's own counting has to survive the merge:
+    /// a word part-way to promotion lives only in memory and is not in the file
+    /// the CLI just wrote.
+    func testAWordAddedFromAShellArrivesWithoutCostingWhatWasCounted() {
+        let url = temporaryFile()
+        let app = UserLexicon(url: url)
+        for _ in 0..<UserLexicon.promotionThreshold { app.observe(["endpoint"], language: .english) }
+        app.observe(["passphrase"], language: .english)
+
+        shellEdit(url) { $0.add("kubectl", language: .english) }
+
+        XCTAssertTrue(app.reload())
+        XCTAssertTrue(app.contains("kubectl", language: .english), "the shell's word")
+        XCTAssertTrue(app.contains("endpoint", language: .english), "learned, never saved")
+        XCTAssertEqual(app.pending(.english).map(\.word), ["passphrase"], "still counting")
+    }
+
+    /// And the save that used to undo it. The app has unsaved words of its own,
+    /// so this is the write that goes out; both sides have to be in it.
+    func testTheNextSaveKeepsBothSidesOfTheEdit() {
+        let url = temporaryFile()
+        let app = UserLexicon(url: url)
+        for _ in 0..<UserLexicon.promotionThreshold { app.observe(["endpoint"], language: .english) }
+
+        shellEdit(url) { $0.add("kubectl", language: .english) }
+        XCTAssertTrue(app.save())
+
+        let reopened = UserLexicon(url: url)
+        XCTAssertTrue(reopened.contains("kubectl", language: .english))
+        XCTAssertTrue(reopened.contains("endpoint", language: .english))
+    }
+
+    /// The race the message cannot close: the app's periodic save fires between
+    /// the CLI writing the file and the app being told about it. Nothing here
+    /// calls `reload`, so the save path is the only thing standing between the
+    /// edit and being overwritten.
+    func testASaveThatRacesTheEditDoesNotOverwriteIt() {
+        let url = temporaryFile()
+        let app = UserLexicon(url: url)
+        for _ in 0..<UserLexicon.promotionThreshold { app.observe(["endpoint"], language: .english) }
+
+        shellEdit(url) { $0.add("kubectl", language: .english) }
+        XCTAssertTrue(app.save())
+
+        XCTAssertTrue(app.contains("kubectl", language: .english), "adopted by the save itself")
+        XCTAssertTrue(UserLexicon(url: url).contains("kubectl", language: .english))
+    }
+
+    /// A word taken back from a shell stays taken back, including one the app
+    /// had already promoted and is holding in memory.
+    func testAWordRemovedFromAShellStaysRemoved() {
+        let url = temporaryFile()
+        let app = UserLexicon(url: url)
+        for _ in 0..<UserLexicon.promotionThreshold {
+            app.observe(["kubectl", "endpoint"], language: .english)
+        }
+        XCTAssertTrue(app.save())
+
+        shellEdit(url) { $0.remove("kubectl", language: .english) }
+
+        XCTAssertTrue(app.reload())
+        XCTAssertFalse(app.contains("kubectl", language: .english))
+        XCTAssertTrue(app.contains("endpoint", language: .english), "untouched by the edit")
+
+        app.observe(["backoffice"], language: .english)
+        app.save()
+        XCTAssertFalse(UserLexicon(url: url).contains("kubectl", language: .english))
+    }
+
+    /// A removal must not be undone by a later count either: the word is gone
+    /// from memory, so counting it again starts from nothing rather than from
+    /// the ten sightings it had.
+    func testARemovalIsNotResurrectedByTheNextSave() {
+        let url = temporaryFile()
+        let app = UserLexicon(url: url)
+        for _ in 0..<UserLexicon.promotionThreshold { app.observe(["kubectl"], language: .english) }
+        XCTAssertTrue(app.save())
+
+        shellEdit(url) { $0.remove("kubectl", language: .english) }
+
+        app.observe(["endpoint"], language: .english)
+        app.save()
+        XCTAssertFalse(app.contains("kubectl", language: .english))
+        XCTAssertFalse(UserLexicon(url: url).contains("kubectl", language: .english))
+    }
+
+    /// `--words clear` deletes the file, and that is the whole message: the
+    /// running copy empties out too, counting included, and writes nothing back.
+    func testClearFromAShellEmptiesTheRunningCopyAndStaysCleared() throws {
+        let url = temporaryFile()
+        let app = UserLexicon(url: url)
+        app.add("kubectl", language: .english)
+        for _ in 0..<UserLexicon.promotionThreshold { app.observe(["endpoint"], language: .english) }
+        app.observe(["passphrase"], language: .english)
+        XCTAssertTrue(app.save())
+
+        shellEdit(url) { $0.clear() }
+
+        XCTAssertTrue(app.reload())
+        XCTAssertFalse(app.contains("kubectl", language: .english))
+        XCTAssertFalse(app.contains("endpoint", language: .english))
+        XCTAssertTrue(app.pending(.english).isEmpty, "the words still counting go as well")
+
+        XCTAssertFalse(app.save())
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: url.path), "nothing is written back")
+    }
+
+    /// The guard on that rule. A copy that has learned something and never yet
+    /// saved also faces a file that is not there, and it must not read its own
+    /// first run as somebody else's `clear`.
+    func testAFileThatHasNeverExistedIsNotAClear() {
+        let url = temporaryFile()
+        let app = UserLexicon(url: url)
+        for _ in 0..<UserLexicon.promotionThreshold { app.observe(["endpoint"], language: .english) }
+
+        XCTAssertFalse(app.reload())
+        XCTAssertTrue(app.contains("endpoint", language: .english))
+        XCTAssertTrue(app.save())
+        XCTAssertTrue(UserLexicon(url: url).contains("endpoint", language: .english))
+    }
+
+    /// Nothing to adopt is not a change, so the app's own state is left exactly
+    /// as it was and the caller has nothing to log.
+    func testReloadingAnUnchangedFileChangesNothing() {
+        let url = temporaryFile()
+        let app = UserLexicon(url: url)
+        app.add("kubectl", language: .english)
+        XCTAssertTrue(app.save())
+
+        XCTAssertFalse(app.reload())
+        XCTAssertTrue(app.contains("kubectl", language: .english))
+    }
+
+    /// A file that is there and cannot be read says nothing. Treating it as
+    /// empty would be treating a half-written file, or one that is not ours at
+    /// all, as an instruction to forget everything.
+    func testAnUnreadableFileIsNotAnInstruction() throws {
+        let url = temporaryFile()
+        let app = UserLexicon(url: url)
+        app.add("kubectl", language: .english)
+        XCTAssertTrue(app.save())
+
+        try Data("not json at all".utf8).write(to: url)
+
+        XCTAssertFalse(app.reload())
+        XCTAssertTrue(app.contains("kubectl", language: .english))
+    }
+
+    /// Each language is merged on its own, as everything else here is.
+    func testAnEditInOneLanguageLeavesTheOtherAlone() {
+        let url = temporaryFile()
+        let app = UserLexicon(url: url)
+        app.add("kubectl", language: .english)
+        XCTAssertTrue(app.save())
+
+        shellEdit(url) { $0.add("خوارزمية", language: .arabic) }
+
+        XCTAssertTrue(app.reload())
+        XCTAssertTrue(app.contains("خوارزمية", language: .arabic))
+        XCTAssertTrue(app.contains("kubectl", language: .english))
     }
 
     /// Undo is a real removal, so a word can be learned again later rather than

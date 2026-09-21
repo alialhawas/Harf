@@ -64,11 +64,16 @@ browser — no checkout required:
 | **Slide deck** | 13 slides covering the whole pipeline, the safety gates, and the two bugs that only live use found. Arrow keys or space to advance. | [view](https://htmlpreview.github.io/?https://raw.githubusercontent.com/alialhawas/Language-changer/auto-detect-keyboard-language-switch/docs/how-it-works.html) · [source](docs/how-it-works.html) |
 | **Diagram** | The flow above as an editable canvas — every box and arrow can be moved. | [open in Excalidraw](https://excalidraw.com/#url=https://raw.githubusercontent.com/alialhawas/Language-changer/auto-detect-keyboard-language-switch/docs/dodoma-how-it-works.excalidraw) · [SVG](docs/how-it-works.svg) |
 | **Capture &amp; segmentation** | 10 slides answering one question in detail: is text judged word by word or a line at a time, and how are the words captured in the first place. | [view](https://htmlpreview.github.io/?https://raw.githubusercontent.com/alialhawas/Language-changer/auto-detect-keyboard-language-switch/docs/how-capture-works.html) · [source](docs/how-capture-works.html) |
-| **Video** | A narrated walkthrough of the same material, for watching rather than clicking. | [docs/how-it-works.mp4](docs/how-it-works.mp4) |
 
 GitHub serves `.html` as plain text rather than rendering it, which is why the
 deck link goes through `htmlpreview` — it fetches the raw file and renders it in
 place. Nothing is uploaded anywhere.
+
+The [Harf origin story](docs/why-we-built-harf.html) covers the Arabic/English
+workflow that inspired the app, interactive system diagrams, and setup. Readers
+can switch the complete article between English and Arabic. It uses Hatif
+branding with PlanetScale-style illustrations. Open the HTML file from a
+checkout; keep the adjacent `docs/assets/` directory for its logo, fonts, and SVG.
 
 
 
@@ -209,9 +214,22 @@ TAP_REPO=alialhawas/homebrew-harf \
 The private key is generated locally and never sent to Apple; only the signing
 request, which carries the public half, is uploaded.
 
-The release script refuses to start if the identity is not a Developer ID, if
-it is not in the keychain, or if the notary profile does not exist — the three
-failures that otherwise surface only after a build has been uploaded.
+The release script refuses to start if the working tree is dirty, if `HEAD` has
+not been pushed (GitHub cannot tag a commit it has never seen), if the signing
+identity is not in the keychain, if `NOTARY_PROFILE` is set and the identity is
+not a Developer ID, or if the notary profile does not exist — the failures that
+otherwise surface only after a build has been uploaded.
+
+The keychain check is the important one. `make sign` falls back to ad-hoc
+signing when the identity is missing, and an ad-hoc build has a different
+designated requirement every time, so publishing one drops the Accessibility
+and Input Monitoring grants of everyone who updates. Local builds keep the
+fallback; a release has to ask for it with `ALLOW_ADHOC=1`.
+
+Each run bumps `CFBundleVersion` in `Resources/Info.plist` before building,
+tags the exact commit that was built (`--target`), rewrites `Casks/harf.rb`
+with the new version and checksum, and commits both so the tree is clean
+afterwards. It does not push that commit.
 
 With that, the disk image opens with a double-click and no warning, and the
 Homebrew cask installs without a prompt. Nothing else about the app changes,
@@ -454,8 +472,9 @@ mode you have already chosen for it. Deleting a seeded row deletes the record of
 your decision, so the seed returns on the next launch.
 
 **Advanced** — the list of applications for which the verify-before-delete
-accessibility read is skipped, the 30-second undo window (read-only) and the two
-shortcuts (read-only; rebinding is not supported).
+accessibility read is skipped, the 30-second undo window (read-only) and the
+three shortcuts — `⌥⌘Z` undo, `⌥⌘P` pause, `⌃⌘F` flip (read-only; rebinding is
+not supported).
 
 ### Memory: how much is held, and for how long
 
@@ -511,7 +530,11 @@ rather than taken on faith.
         endpoint     4/10
 
 The file is rewritten at most every twenty seconds while the app runs, so what
-you read is current without having to quit it.
+you read is current without having to quit it. Edits go the other way just as
+promptly: `add`, `remove` and `clear` write the file and then tell the running
+copy, which merges the change into the vocabulary it is using rather than
+replacing it — so a word added here counts on your next keystroke, the words
+learned earlier in the session survive, and nothing has to be quit first.
 
 What can be learned is deliberately narrow:
 
@@ -648,7 +671,7 @@ its own record of your keystrokes there instead:
     open("/tmp/dodoma.plist","wb").write(plistlib.dumps(d))
     EOF
     defaults import com.ali.dodoma /tmp/dodoma.plist
-    pkill -x Harf; open /Applications/Harf.app
+    harf --quit; open /Applications/Harf.app
 
 The undo hotkey is the safety net for those apps, since the screen is no longer
 being checked before the delete.
@@ -666,8 +689,47 @@ is worth a run before trusting a build.
 
 The same binary is the menu-bar app and the command line, so there is no second
 executable to install. The Homebrew cask puts it on your PATH as `harf`; from a
-checkout, `swift run Harf <args>` is the same thing. Both edit the settings the
-running app reads, so a change reaches it on its next evaluation — no restart.
+checkout, `swift run Harf <args>` is the same thing. A change made here reaches
+the running copy without a restart: the setting is saved and that copy is then
+asked to re-read it. If it cannot be asked, the command says so on standard
+error — the setting is saved either way and is in force at the next launch.
+
+### Starting and stopping
+
+Open `/Applications/Harf.app` to start it. **`harf` on its own does not start the
+app**: it prints a short usage block and exits `2`.
+
+That is deliberate, and it is worth saying why, because the alternative looks
+tidier and is not. The binary on your PATH is the app's own executable, so
+typing `harf` used to start a complete menu-bar app — event tap included — out
+of a terminal window that then had to stay open. Nothing announced it: Harf is
+an accessory with no Dock tile, and a process started from the executable rather
+than the bundle carries no bundle identifier, so it is invisible to
+LaunchServices and to `pkill -x Harf` alike. The copy you later opened from
+`/Applications` corrected everything you typed a second time.
+
+```
+harf --quit        stop the copy that is running
+```
+
+`--quit` asks the running copy through the same channel that enforces the
+single-copy rule, so it works whichever way that copy was started, and the copy
+goes out through its normal shutdown — which is what writes the words it has
+learned in the last few seconds. `pkill` skips that, and is only worth reaching
+for against a build older than this feature.
+
+**Only one copy runs at a time.** A second one refuses to start, says which copy
+won and how to stop it, and exits `3`. The check is a name registered in the
+login session, not a search of what is running, so it catches a copy started
+from a shell just as well as one started from a bundle — and it goes away by
+itself when that copy does, with no lock file to clear after a crash.
+
+Two escape hatches, both for development:
+
+| Variable | Effect |
+| --- | --- |
+| `HARF_FORCE_APP=1` | start an unbundled build as the application: `swift run Harf`, `.build/release/Harf`, a debugger session |
+| `HARF_IGNORE_INSTANCE=1` | skip the single-copy check, with a warning in the log — for the case where the name cannot be registered for some reason other than a second copy |
 
 ### Reading what is set
 
@@ -676,12 +738,13 @@ running app reads, so a change reaches it on its next evaluation — no restart.
 ```
 Harf 1.0.0
 
-  running          yes
+  running          yes (process 4321)
   accessibility    yes
   input monitoring yes
+  state            Active (capturing)
 
   launch at login  yes
-  shortcuts        ⌥⌘Z undo, ⌥⌘P pause
+  shortcuts        ⌥⌘Z undo, ⌥⌘P pause, ⌃⌘F flip
 
   paused           no
   sensitivity      balanced
@@ -703,6 +766,21 @@ Harf 1.0.0
   words learned    8  (0 added by hand, 394 on the way)
   vocabulary file  /Users/you/Library/Application Support/Harf/lexicon.json
 ```
+
+Every line above is the *running copy's* answer, not the terminal's. That
+distinction is the whole reason the command asks it: macOS grants Accessibility
+and Input Monitoring per process, so a terminal that has been granted
+Accessibility — which any terminal running a build script has — used to make
+`--status` print `accessibility yes` while the app itself was logging
+`accessibility=false`, and the `state` line is the same sentence the menu bar
+shows, taken from the same renderer. The settings are the ones that copy has
+*applied*, and when they differ from what is saved the command says so.
+
+With nothing running, or with a copy whose main run loop is busy enough not to
+answer within two seconds, the grants read `unknown` rather than `no` — a
+question that could not be asked has no answer, and `no` would send you to
+System Settings to re-grant something that was never revoked. The settings shown
+are then the saved ones, marked as such.
 
 `harf --help` lists every command, every setting you can change, the values each
 one accepts and its default. `harf --config` prints the settings as JSON, for
@@ -812,20 +890,60 @@ machines can be driven from a test target.
 Detection is fully offline. `Sources/DodomaCore/Resources` holds a word list of
 up to 40k words and a letter-bigram table per language, generated by `Tools/build-ngrams.py`
 from the MIT-licensed
-[FrequencyWords](https://github.com/hermitdave/FrequencyWords) corpus. That
-script is the only thing in the project that touches the network, it only does
-so on a developer machine when `Tools/data/` is cold, and its output is
-committed. See `Sources/DodomaCore/Resources/LICENSES.md` for attribution.
+[FrequencyWords](https://github.com/hermitdave/FrequencyWords) corpus, merged
+with a small hand-curated Gulf Arabic supplement (`Tools/dialect/ar.txt`, which
+is tracked, so a fresh clone regenerates the same models). Both downloads are
+pinned to a commit and their sha256 asserted before anything is cached.
+
+That script is the only thing the **app and its build** touch the network for,
+it only does so on a developer machine when `Tools/data/` is cold, and its
+output is committed. The app itself never opens a socket. The release plumbing
+does — `scripts/release.sh` uploads to GitHub, notarises with Apple and pushes
+the tap, and `scripts/devid-setup.sh` talks to your keychain and to Apple's
+certificate authority — but none of that is part of a build or a run.
+
+See `Sources/DodomaCore/Resources/LICENSES.md` for attribution.
 
 ## Removal
 
+Remove it the way it was installed. The two paths are not interchangeable:
+running the script against a Homebrew install deletes the bundle out from under
+the cask and leaves a dangling `harf` on your PATH, so `uninstall.sh` detects
+that case and stops rather than proceeding.
+
+**Installed with Homebrew:**
+
 ```
-scripts/uninstall.sh   # quit, delete /Applications/Harf.app, reset grants
+brew uninstall --zap --cask alialhawas/harf/harf
+```
+
+`--zap` is the part that matters. Without it Homebrew removes the app and
+leaves your preferences, caches, saved window state and — the only file derived
+from what you typed — your learned words behind. With it, all four go:
+
+```
+~/Library/Application Support/Harf      # lexicon.json, the learned words
+~/Library/Preferences/com.ali.dodoma.plist
+~/Library/Caches/com.ali.dodoma
+~/Library/Saved Application State/com.ali.dodoma.savedState
+```
+
+**Installed from a checkout:**
+
+```
+scripts/uninstall.sh   # quit, delete /Applications/Harf.app and the learned
+                       # words, reset both grants
 scripts/reset-tcc.sh   # reset the two privacy grants only
 ```
 
-`uninstall.sh` deliberately leaves the Dodoma Dev certificate, its private key
-and its trust setting in the login keychain, so that reinstalling does not
+`uninstall.sh` deletes `~/Library/Application Support/Harf` along with the
+bundle, so the learned-word file does not outlive the app. It reports each
+privacy grant separately and exits non-zero if either could not be reset, since
+a grant left standing for an app that is gone is the case worth acting on. It
+leaves your preferences alone; `defaults delete com.ali.dodoma` removes those.
+
+`uninstall.sh` also deliberately leaves the Dodoma Dev certificate, its private
+key and its trust setting in the login keychain, so that reinstalling does not
 require another `make-cert.sh` run. To remove those too:
 
 ```

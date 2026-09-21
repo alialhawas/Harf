@@ -96,6 +96,70 @@ final class SettingsStore {
 
     func skipsAXVerify(_ bundleID: String?) -> Bool { settings.skipsAXVerify(bundleID) }
 
+    // MARK: - Re-reading
+
+    /// Picks up a blob written by another process — which in practice means
+    /// `harf --set`.
+    ///
+    /// The store caches at init and nothing ever looked again, so a setting
+    /// changed from a shell did not reach the running app at all; worse, the
+    /// app's next write copied its stale cache over it. `UserDefaults
+    /// .didChangeNotification` is no help: it is same-process only. So the CLI
+    /// writes the blob and then asks the running copy to call this, over the
+    /// single-instance port.
+    ///
+    /// Returns whether anything actually changed, which is what the caller
+    /// announces. Three things are deliberate:
+    ///
+    /// - A missing blob is not an error and not a reason to load anything. It
+    ///   means the domain was removed under a running app, and the defaults are
+    ///   *permissive* — not paused, every app normal — so adopting them would
+    ///   silently un-pause the app and switch capture back on everywhere the
+    ///   user had switched it off.
+    /// - An unreadable blob is the same refusal, for the same reason, and it is
+    ///   logged as a fault because somebody wrote nonsense over the settings of
+    ///   a running app. Unlike `init`, it does *not* move the bytes aside under
+    ///   `settings.corrupt`: at launch there is a user who can be told the
+    ///   defaults were restored, here there is neither a restore nor a user, and
+    ///   overwriting the rescue copy from a background reload would destroy the
+    ///   one thing `init` saved.
+    /// - `onChange` fires outside the lock, because the listeners are the
+    ///   pipeline and the settings window and neither has any business running
+    ///   while this store is locked.
+    @discardableResult
+    func reload() -> Bool {
+        lock.lock()
+        guard let stored = defaults.data(forKey: Key.settings) else {
+            lock.unlock()
+            return false
+        }
+        if AppSettings.isUnreadable(stored) {
+            lock.unlock()
+            Log.app.fault(
+                "the settings blob changed under a running copy and could not be read; the settings in memory were kept"
+            )
+            return false
+        }
+        let loaded = AppSettings.load(storedJSON: stored)
+        guard loaded != cached else {
+            lock.unlock()
+            return false
+        }
+        cached = loaded
+        lock.unlock()
+
+        onChange?(loaded)
+        return true
+    }
+
+    /// Pushes the written blob out of this process's `UserDefaults` cache so the
+    /// app can read it back. For the CLI to call between writing a setting and
+    /// asking the running copy to re-read: the two are different processes, and
+    /// without this the reload can race the write and find the old bytes.
+    func flush() {
+        defaults.synchronize()
+    }
+
     // MARK: - Writing
 
     func setPaused(_ paused: Bool) {
@@ -173,11 +237,30 @@ final class SettingsStore {
     /// caller is a menu item, a hot key handler or a settings-window control,
     /// and `onChange` is delivered synchronously on the calling thread to
     /// whoever owns the pipeline.
+    ///
+    /// The mutation is applied to what is *persisted*, not to the cache. The
+    /// cache can be stale — another process can have written the blob since
+    /// this one loaded it — and a mutation based on the stale copy does not
+    /// merely miss that change, it encodes the whole settings value and
+    /// overwrites it. This is the other half of the defect `reload` fixes, and
+    /// the more destructive half: `harf --set paused yes` followed by any menu
+    /// click used to lose the pause.
+    ///
+    /// Two different questions come out of that, and they are answered
+    /// separately. Whether to *write* is whether this call moved either the
+    /// blob or the cache: a click that puts a setting back to the value already
+    /// in memory changes nothing in memory, but if the blob disagrees it still
+    /// has to be written, or the next reload would hand the other value back and
+    /// silently undo the click. Whether to *announce* is only whether the
+    /// in-memory value moved — nobody listening has anything to do about a write
+    /// that changed nothing they can see.
     private func mutate(_ body: (inout AppSettings) -> Void) {
         lock.lock()
-        var updated = cached
+        let base = persistedOrCached()
+        var updated = base
         body(&updated)
-        guard updated != cached else {
+        let moved = updated != cached
+        guard moved || updated != base else {
             lock.unlock()
             return
         }
@@ -185,7 +268,20 @@ final class SettingsStore {
         lock.unlock()
 
         persist(updated)
-        onChange?(updated)
+        if moved { onChange?(updated) }
+    }
+
+    /// What a write should be based on: the blob if it can be read, the cache
+    /// otherwise. Call with the lock held — it reads `cached`.
+    ///
+    /// The seed merge is applied for the same reason `load` applies it: a blob
+    /// written by an older build is missing the policies this one seeds, and a
+    /// mutation that persisted the un-merged value would drop them.
+    private func persistedOrCached() -> AppSettings {
+        guard let stored = defaults.data(forKey: Key.settings),
+              let decoded = try? JSONDecoder().decode(AppSettings.self, from: stored)
+        else { return cached }
+        return decoded.mergingSeedDefaults()
     }
 
     private func persist(_ settings: AppSettings) {
