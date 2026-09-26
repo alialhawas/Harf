@@ -436,12 +436,12 @@ private struct GeneralTab: View {
     private var confidenceEnabled: Binding<Bool> {
         Binding(
             get: { model.settings.confidentScore != nil },
-            set: { model.setConfidentScore($0 ? (model.settings.confidentScore ?? 0.90) : nil) })
+            set: { model.setConfidentScore($0 ? (model.settings.confidentScore ?? 0.80) : nil) })
     }
 
     private var confidenceScore: Binding<Double> {
         Binding(
-            get: { model.settings.confidentScore ?? 0.90 },
+            get: { model.settings.confidentScore ?? 0.80 },
             set: { model.setConfidentScore($0) })
     }
 
