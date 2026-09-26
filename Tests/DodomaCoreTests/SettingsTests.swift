@@ -29,6 +29,26 @@ final class SettingsTests: XCTestCase {
         }
     }
 
+    /// The shipped confident score, pinned. It is the only gate that can fix a
+    /// region shorter than the ordinary length rules allow, so the number is
+    /// what decides whether a one-word mistake is corrected at all; moving it
+    /// changes the behaviour of every fresh install.
+    func testFreshInstallShipsTheConfidentScoreAtEightyPercent() {
+        XCTAssertEqual(AppSettings.defaults.confidentScore, 0.80)
+        XCTAssertEqual(AppSettings().confidentScore, 0.80)
+    }
+
+    /// The default applies to a fresh install only. A settings file written
+    /// before the field existed keeps the old behaviour, so an upgrade does not
+    /// start rewriting single words on somebody who never asked for it.
+    func testAStoredBlobWithoutAConfidentScoreStaysOff() throws {
+        XCTAssertNil(try JSONDecoder().decode(AppSettings.self, from: Data("{}".utf8))
+            .confidentScore)
+        var stored = AppSettings.defaults
+        stored.confidentScore = nil
+        XCTAssertNil(AppSettings.load(storedJSON: try encode(stored)).confidentScore)
+    }
+
     /// The exact seed lists, spelled out. A typo in a bundle identifier is a
     /// silent loss of protection, and these are the identifiers the plan names.
     func testSeedListsAreExactlyTheDocumentedBundleIdentifiers() {

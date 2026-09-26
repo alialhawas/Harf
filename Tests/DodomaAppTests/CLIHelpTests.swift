@@ -22,6 +22,18 @@ final class CLIHelpTests: XCTestCase {
         }
     }
 
+    /// The default column is hand-written beside the switch that owns the
+    /// value, so a default moved in code and not here teaches the wrong number.
+    func testHelpPrintsTheShippedConfidentDefault() throws {
+        let score = try XCTUnwrap(AppSettings.defaults.confidentScore)
+        let row = try XCTUnwrap(
+            CLI.helpText.split(separator: "\n").first { $0.contains("a score, 70 or 0.70") },
+            "the confident row is gone from --help")
+        XCTAssertTrue(
+            row.hasSuffix(SettingsCopy.percent(score).replacingOccurrences(of: "%", with: "")),
+            "--help states a confident default the app does not ship: \(row)")
+    }
+
     /// Every command that writes a setting has to be discoverable from --help,
     /// or it is a setting only the settings window can reach — which is what
     /// the verify-skip list was until it was given a command.

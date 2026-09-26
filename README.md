@@ -748,7 +748,7 @@ Harf 1.0.0
 
   paused           no
   sensitivity      balanced
-  confident score  90%
+  confident score  80%
   buffer           200 keystrokes
   idle             10s, then the buffer is dropped
   learning words   yes
@@ -805,7 +805,7 @@ harf --words add kubectl --lang en
 | --- | --- | --- |
 | `paused` | `yes` / `no` | `no` |
 | `sensitivity` | `conservative` / `balanced` / `eager` | `balanced` |
-| `confident` | a score, `70` or `0.70`, or `off` | `90` |
+| `confident` | a score, `70` or `0.70`, or `off` | `80` |
 | `buffer` | 20–500 keystrokes | `200` |
 | `idle` | seconds before the buffer is dropped | `10` |
 | `learn` | `yes` / `no` | `yes` |

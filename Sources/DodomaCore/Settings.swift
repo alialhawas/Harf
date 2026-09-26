@@ -59,7 +59,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public init(
         schemaVersion: Int = AppSettings.currentSchemaVersion,
         aggressiveness: Aggressiveness = .balanced,
-        confidentScore: Double? = 0.90,
+        confidentScore: Double? = 0.80,
         bufferCapacity: Int = TypedBuffer.defaultCapacity,
         idleTimeout: Double = BufferResetPolicy.idleTimeout,
         learnVocabulary: Bool = true,

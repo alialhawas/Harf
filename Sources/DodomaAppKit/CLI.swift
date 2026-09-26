@@ -96,7 +96,7 @@ public enum CLI {
           paused                           yes | no                   no
           sensitivity                      conservative | balanced    balanced
                                            | eager
-          confident                        a score, 70 or 0.70,       90
+          confident                        a score, 70 or 0.70,       80
                                            or off
           buffer                           20-500 keystrokes          200
           idle                             seconds before the         10
