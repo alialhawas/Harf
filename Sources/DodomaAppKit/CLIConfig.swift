@@ -327,7 +327,7 @@ enum CLIConfig {
         case "confidentScore", "confident":
             if raw == "off" || raw == "none" {
                 store.setConfidentScore(nil)
-            } else if let score = percentOrFraction(raw) {
+            } else if let score = confidentScore(raw) {
                 store.setConfidentScore(score)
             } else {
                 return CLI.fail(
@@ -516,10 +516,28 @@ enum CLIConfig {
     }
 
     /// Accepts 0.9 and 90 alike, because both are the obvious thing to type.
-    private static func percentOrFraction(_ raw: String) -> Double? {
+    /// How a confident-score argument reads, wherever one is typed: `--set
+    /// confident`, `--decide --confident` and `--eval --confident` all come
+    /// through here.
+    ///
+    /// Two scales, because both get typed for the same threshold. `--status`
+    /// and the settings window show it as a percentage, so `90` is what
+    /// somebody reading either of those reaches for; the JSON `--config` prints
+    /// holds `0.9`, so that is what somebody scripting against it reaches for.
+    ///
+    /// The result is clamped into the band the store keeps rather than handed
+    /// back raw. `--decide` and `--eval` answer "what would the app do at this
+    /// setting", and a number the store would not hold is not a setting the app
+    /// can ever be at — so reporting on it would describe a configuration that
+    /// cannot exist. `--set` clamps again on the way in, which is harmless.
+    ///
+    /// Returns nil for anything that is not a score at all, so each caller can
+    /// name its own flag in the failure.
+    static func confidentScore(_ raw: String) -> Double? {
         guard let value = Double(raw.replacingOccurrences(of: "%", with: "")) else { return nil }
         let score = value > 1 ? value / 100 : value
-        return (0.5...1.0).contains(score) ? score : nil
+        guard (0.5...1.0).contains(score) else { return nil }
+        return SettingsStore.clampConfidentScore(score)
     }
 
     private static func badBool(_ key: String, _ raw: String) -> Int32 {

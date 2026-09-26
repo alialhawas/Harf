@@ -84,6 +84,46 @@ final class EvalTests: XCTestCase {
         XCTAssertEqual(report.exitCode, 0)
     }
 
+    // MARK: - The confident-score override
+
+    /// `--eval --confident X` exists so a threshold can be swept against the
+    /// corpus before it is written into anybody's settings. That only means
+    /// something if the number reaches the gate: `run` used to take the
+    /// parameter and drop it on the floor, so every sweep from 0.98 down to
+    /// 0.70 rendered the same report and the confident path was never once
+    /// exercised by the corpus.
+    ///
+    /// `\u{63A}\u{62B}\u{633} ` is "yes" typed on the Arabic layout — three letters and a
+    /// space, short enough that only the confident path can auto-apply it. A
+    /// threshold it clears and a threshold it misses therefore have to disagree.
+    func testTheConfidentScoreReachesTheGate() throws {
+        let fixture = try DetectorFixture.make()
+        let rows = try EvalHarness.parse("\u{63A}\u{62B}\u{633} \tauto_en")
+
+        let lenient = EvalHarness.run(
+            rows: rows, detector: fixture.detector, confidentScore: 0.80,
+            keyboardType: fixture.keyboardType)
+        let strict = EvalHarness.run(
+            rows: rows, detector: fixture.detector, confidentScore: 0.98,
+            keyboardType: fixture.keyboardType)
+
+        XCTAssertEqual(lenient.outcomes.first?.predicted, .autoEnglish, lenient.render())
+        XCTAssertEqual(strict.outcomes.first?.predicted, .ignore, strict.render())
+        XCTAssertNotEqual(lenient.render(), strict.render())
+    }
+
+    /// No `--confident` at all has to stay what it was: the gate is off, so the
+    /// short row falls back to the ordinary rules and is left alone.
+    func testNoConfidentScoreLeavesTheShortRowAlone() throws {
+        let fixture = try DetectorFixture.make()
+        let rows = try EvalHarness.parse("\u{63A}\u{62B}\u{633} \tauto_en")
+
+        let report = EvalHarness.run(
+            rows: rows, detector: fixture.detector, keyboardType: fixture.keyboardType)
+
+        XCTAssertEqual(report.outcomes.first?.predicted, .ignore, report.render())
+    }
+
     // MARK: - Parsing
 
     func testParseSkipsCommentsAndBlankLines() throws {

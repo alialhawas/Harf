@@ -155,6 +155,11 @@ public enum EvalHarness {
         return rows
     }
 
+    /// `confidentScore` is the same override the app takes from its settings:
+    /// nil leaves the confident path off, a value arms it. It has to travel all
+    /// the way to `Detector.detect` or a threshold sweep is meaningless — every
+    /// value would render the same report and the one gate the sweep exists to
+    /// calibrate would never fire.
     public static func run(
         rows: [EvalRow],
         detector: Detector,
@@ -163,15 +168,18 @@ public enum EvalHarness {
         keyboardType: UInt32? = nil
     ) -> EvalReport {
         EvalReport(outcomes: rows.map { evaluate($0, detector: detector,
-            aggressiveness: aggressiveness, keyboardType: keyboardType) })
+            aggressiveness: aggressiveness, confidentScore: confidentScore,
+            keyboardType: keyboardType) })
     }
 
     private static func evaluate(
-        _ row: EvalRow, detector: Detector, aggressiveness: Aggressiveness, keyboardType: UInt32?
+        _ row: EvalRow, detector: Detector, aggressiveness: Aggressiveness,
+        confidentScore: Double?, keyboardType: UInt32?
     ) -> EvalOutcome {
         guard
             let detection = detector.detect(
-                text: row.text, aggressiveness: aggressiveness, keyboardType: keyboardType)
+                text: row.text, aggressiveness: aggressiveness,
+                confidentScore: confidentScore, keyboardType: keyboardType)
         else {
             return EvalOutcome(
                 row: row, predicted: .ignore,

@@ -500,10 +500,11 @@ public enum CLI {
         }
 
         let sourceLayout = detector.layout(for: typedLanguage)
-        let confidentScore = confident.flatMap(Double.init)
+        let threshold = confidentScore(confident, flag: "--decide")
+        if let problem = threshold.problem { return fail(problem, code: 2) }
         guard let detection = detector.detect(text: text, typedLanguage: typedLanguage,
                                               aggressiveness: level,
-                                              confidentScore: confidentScore)
+                                              confidentScore: threshold.score)
         else {
             let character = InverseKeymap.unmappableCharacter(in: text, layout: sourceLayout)
             return fail(
@@ -563,6 +564,9 @@ public enum CLI {
     private static func eval(_ path: String, aggressiveness: String?, confident: String?)
         -> Int32
     {
+        let threshold = confidentScore(confident, flag: "--eval")
+        if let problem = threshold.problem { return fail(problem, code: 2) }
+
         if let message = preloadModels() { return fail("--eval: \(message)", code: 1) }
         guard let detector = corpusDetector() else {
             return fail(
@@ -589,7 +593,7 @@ public enum CLI {
 
         let report = EvalHarness.run(
             rows: rows, detector: detector, aggressiveness: level,
-            confidentScore: confident.flatMap(Double.init))
+            confidentScore: threshold.score)
         print(report.render())
         return report.exitCode
     }
@@ -608,6 +612,30 @@ public enum CLI {
             }
         }
         return nil
+    }
+
+    /// Reads the `--confident` argument that `--decide` and `--eval` share,
+    /// through the one reading `--set confident` uses, so a threshold typed at
+    /// a flag and the same threshold typed into the settings mean one number.
+    ///
+    /// A bare `Double.init` used to stand here, which took `--confident 90` as
+    /// a threshold of 90.0. Nothing scores above 1, so every fix was blocked
+    /// and the command still exited zero — the worst shape a wrong answer can
+    /// take, because `--eval`'s exit code is read by a build gate as a verdict
+    /// on the corpus. A value that is not a score is now named and the command
+    /// stops, rather than being taken at face value.
+    ///
+    /// Nil `raw` is the flag left off, which is the gate off and not a failure.
+    static func confidentScore(_ raw: String?, flag: String)
+        -> (score: Double?, problem: String?)
+    {
+        guard let raw else { return (nil, nil) }
+        guard let score = CLIConfig.confidentScore(raw) else {
+            return (
+                nil,
+                "\(flag): --confident expects a score such as 0.9 or 90, got '\(raw)'")
+        }
+        return (score, nil)
     }
 
     private static func parseAggressiveness(_ raw: String?) -> Aggressiveness? {

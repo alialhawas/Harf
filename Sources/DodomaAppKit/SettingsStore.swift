@@ -184,7 +184,20 @@ final class SettingsStore {
     }
 
     func setConfidentScore(_ score: Double?) {
-        mutate { $0.confidentScore = score.map { min(max($0, 0.60), 0.99) } }
+        mutate { $0.confidentScore = score.map(Self.clampConfidentScore) }
+    }
+
+    /// The band a confident score is held in, in one place because more than
+    /// the settings window sets one: `--set confident` writes here, and
+    /// `--decide`/`--eval` take the same number as a flag to report what the
+    /// app would do at that setting. A second copy of these two numbers is a
+    /// second answer to "what threshold is in force".
+    ///
+    /// Below 0.60 the gate fires on text nothing would call certain, which is
+    /// the one path allowed to rewrite text too short for the ordinary rules.
+    /// 1.0 is unreachable, so it would be an off switch that reads as on.
+    static func clampConfidentScore(_ score: Double) -> Double {
+        min(max(score, 0.60), 0.99)
     }
 
     func setPolicy(_ policy: AppPolicy, for bundleID: String) {
