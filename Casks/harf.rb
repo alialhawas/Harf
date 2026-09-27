@@ -1,6 +1,6 @@
 cask "harf" do
-  version "1.0.0"
-  sha256 "787a7f7e2c143cac01f6fa9bb9f66e54140b8ce305bfbdb9323d92044ae5ee1d"
+  version "1.0.1"
+  sha256 "35d3bf35b3612855bb56a55d9dcdec0d7d5562ab551ee3478875d98957d9b955"
 
   url "https://github.com/alialhawas/Language-changer/releases/download/v#{version}/Harf-#{version}.dmg"
   name "Harf"
