@@ -43,6 +43,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     /// Bumped by every flash so a stale restore cannot undo a newer one.
     private var flashToken = 0
 
+    /// Stops a second "Check for Updates…" click from putting a second request
+    /// on the wire and a second alert on top of the first.
+    private var updateGate = UpdateCheckGate()
+
     /// The menu's rendering of `Hotkeys.undoLastFix`. The letter is spelled out
     /// because a key equivalent is a character and a hot key is a key code, and
     /// nothing translates one into the other without asking the active layout.
@@ -293,6 +297,15 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         onboardingItem.target = self
         menu.addItem(onboardingItem)
 
+        // The only item in this menu that opens a socket, and it does so on the
+        // click rather than on a timer: there is no scheduled check anywhere in
+        // Harf, which is what keeps "no network request unless you ask" true.
+        let updateItem = NSMenuItem(title: "Check for Updates…",
+                                    action: #selector(checkForUpdates),
+                                    keyEquivalent: "")
+        updateItem.target = self
+        menu.addItem(updateItem)
+
         menu.addItem(.separator())
 
         let accessibilityItem = NSMenuItem(title: "Open Accessibility Settings…",
@@ -419,6 +432,65 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     @objc private func showDebugWindow() {
         onShowDebugWindow?()
+    }
+
+    // MARK: - Checking for updates
+
+    /// Asks GitHub whether there is a newer release, and says so either way.
+    ///
+    /// The request is off the main thread — `URLSession` calls back on its own
+    /// queue — because ten seconds of a wedged network on the main thread is ten
+    /// seconds of a beachball in whatever the user is typing in: this process
+    /// owns the event tap, and a blocked main thread there is felt everywhere.
+    /// The alert goes back to the main thread, which is where AppKit requires it.
+    ///
+    /// `InstallKind.detect` also runs off the main thread: it reads the
+    /// filesystem and looks for Homebrew, and neither is work to do while the
+    /// menu is closing.
+    @objc private func checkForUpdates() {
+        guard updateGate.begin() else {
+            Log.app.info("update check already in flight; ignoring the second request")
+            return
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let install = InstallKind.detect()
+            UpdateCheck.check { result in
+                DispatchQueue.main.async {
+                    self?.updateGate.finish()
+                    self?.present(UpdateAlert.describing(result, install: install))
+                }
+            }
+        }
+    }
+
+    /// Renders what `UpdateAlert` decided. Nothing is chosen here: every word and
+    /// both buttons come from the value, which is what makes the decision
+    /// testable without a modal nobody can dismiss.
+    private func present(_ description: UpdateAlert) {
+        let alert = NSAlert()
+        alert.messageText = description.title
+        alert.informativeText = description.body
+        alert.alertStyle = description.isWarning ? .warning : .informational
+        if let title = description.actionTitle {
+            alert.addButton(withTitle: title)
+        }
+        alert.addButton(withTitle: "OK")
+
+        // An accessory app has no windows and is not frontmost, so without this
+        // the alert opens behind whatever the user was typing in.
+        NSApplication.shared.activate()
+
+        guard alert.runModal() == .alertFirstButtonReturn, let action = description.action else {
+            return
+        }
+        switch action {
+        case .copy(let command):
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(command, forType: .string)
+        case .open(let url):
+            NSWorkspace.shared.open(url)
+        }
     }
 
     @objc private func quit() {

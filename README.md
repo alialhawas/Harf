@@ -15,9 +15,9 @@ you type, notices when a word only makes sense under the other layout, deletes
 what is on screen and types the correction in its place, switching the keyboard
 layout as it goes.
 
-It runs as a background agent with no Dock icon, does no networking of any kind,
-and keeps everything it observes on the machine. Version 1.0.1, macOS 14 or
-newer.
+It runs as a background agent with no Dock icon, makes no network request unless
+you explicitly ask it to check for a new version, and keeps everything it
+observes on the machine. Version 1.0.1, macOS 14 or newer.
 
 ## Why this exists
 
@@ -128,6 +128,15 @@ whole tap, present and future, and then the short name `brew install harf`
 works. Prefer the qualified form.
 
 Homebrew 6 does not tap on your behalf, so the `brew tap` line is required.
+
+To upgrade it later:
+
+    brew upgrade --cask alialhawas/harf/harf
+
+That quits the running copy before replacing the bundle, which it has to: Harf
+holds a keyboard event tap, and deleting the bundle from under it would leave it
+tapping the keyboard with no app behind it. `harf --update` runs this for you
+after checking whether there is anything to install.
 
 macOS will still refuse the app the first time, because it is not notarised.
 Allow it once under **System Settings → Privacy & Security → Open Anyway**.
@@ -391,6 +400,7 @@ follow. The event tap keeps running so that unpausing needs no permission dance.
 | **Mode for &lt;app&gt;** | Normal / Suggest only / Off, for the application you were typing in |
 | **Settings…** ⌘, | The window below |
 | **Onboarding…** | Reopens the first-run walkthrough |
+| **Check for Updates…** | Asks GitHub whether a newer release exists, on the click and never on a timer |
 | **Open Accessibility / Input Monitoring Settings…** | The two System Settings panes |
 | **Debug Window** | Live buffer, decisions and key log |
 | **Quit Harf** | |
@@ -568,7 +578,7 @@ reason to be exact about what it keeps.
 | Keystrokes | in memory only, `--set buffer N` keys at a time, dropped after `--set idle N` seconds of silence |
 | Password fields | never captured; detecting one purges the keystroke history immediately |
 | Learned words | the only thing written to disk. `~/Library/Application Support/Harf/lexicon.json`, owner-readable (0600). `--set learn off` stops it and erases the file; `--words clear` erases it on demand |
-| Everything else | nothing. No network code exists in the app |
+| Everything else | nothing. The one request the app can make is an update check, and only when you ask for one — see [Checking for updates](#checking-for-updates). It sends no keystrokes, no identifier and no telemetry; it reads the newest release tag and nothing else |
 
 `--set debugLogging on` records the text of detected regions to the system log
 for troubleshooting. It is off by default, and the text is written as private,
@@ -818,6 +828,58 @@ is applied however few letters there are, and `off` restores the length rules.
 They move independently, so turning `sensitivity` up while `confident` sits near
 100 pulls in opposite directions.
 
+### Checking for updates
+
+This is the only thing in Harf that uses the network, and it happens when you
+ask for it: the **Check for Updates…** menu item, or
+
+```
+harf --update                  check, then upgrade a Homebrew install
+harf --update --check-only     check and report, change nothing
+```
+
+There is no timer, no check at launch and no setting that turns one on. Nothing
+is asked of GitHub unless one of those two things is what you just did.
+
+The request is a single unauthenticated `GET` of
+`api.github.com/repos/alialhawas/Harf/releases/latest`, with a ten-second
+timeout. It reads the newest release's tag and compares it against this build's
+version, numerically and component by component, so `1.0.10` is correctly newer
+than `1.0.9`. It sends no keystrokes, no identifier and no telemetry, and there
+is nothing to opt out of because nothing happens on its own.
+
+What it does next depends on how this copy was installed, which Harf works out
+by checking whether `$(brew --prefix)/bin/harf` is a symlink into the bundle
+that is running:
+
+* **Installed with Homebrew** — `--update` runs
+  `brew upgrade --cask alialhawas/harf/harf` and streams its output, exiting with
+  Homebrew's own status. The menu offers the command with a button that copies
+  it.
+* **Anything else** — the release page and the four manual steps are printed.
+  The menu offers a button that opens the release page.
+
+**Harf does not update itself.** It downloads nothing and never replaces
+`/Applications/Harf.app`. Two reasons, and neither goes away by writing more
+code:
+
+* The build is not notarised, so a downloader would have nothing trustworthy to
+  verify what it fetched *against*. The only checksum for a release DMG is
+  published in the same GitHub release as the DMG, so anything able to serve a
+  bad file can serve a matching hash beside it. Homebrew's `sha256` is different
+  in kind: it lives in `Casks/harf.rb`, in a tap you trusted when you installed,
+  and Homebrew checks the download against it. Delegating to `brew` is the point.
+* Replacing the bundle under a running copy is exactly what the cask's
+  `uninstall quit:` stanza exists to prevent. That copy holds a live keyboard
+  event tap; swapping the app beneath it leaves it tapping every key you press
+  with nothing behind it, and loses the words it has learned since its last save.
+
+`--update` exits `0` when there is nothing to install, non-zero when the check
+itself failed — so a script can tell "up to date" from "could not find out". The
+likeliest failure is GitHub's rate limit, which allows a limited number of
+unauthenticated requests an hour per address and is shared by everyone behind one
+NAT; it is reported as a rate limit rather than as the bare `403` it arrives as.
+
 ### Inspecting a decision
 
 No permissions required for any of these:
@@ -895,12 +957,16 @@ with a small hand-curated Gulf Arabic supplement (`Tools/dialect/ar.txt`, which
 is tracked, so a fresh clone regenerates the same models). Both downloads are
 pinned to a commit and their sha256 asserted before anything is cached.
 
-That script is the only thing the **app and its build** touch the network for,
-it only does so on a developer machine when `Tools/data/` is cold, and its
-output is committed. The app itself never opens a socket. The release plumbing
-does — `scripts/release.sh` uploads to GitHub, notarises with Apple and pushes
-the tap, and `scripts/devid-setup.sh` talks to your keychain and to Apple's
-certificate authority — but none of that is part of a build or a run.
+That script is the only thing the **build** touches the network for, it only does
+so on a developer machine when `Tools/data/` is cold, and its output is
+committed. Detection never opens a socket: no part of watching, scoring or
+correcting what you type involves the network at any setting. The one request
+the app can make is the update check described under
+[Checking for updates](#checking-for-updates), and only when you ask for it. The
+release plumbing has network of its own — `scripts/release.sh` uploads to GitHub,
+notarises with Apple and pushes the tap, and `scripts/devid-setup.sh` talks to
+your keychain and to Apple's certificate authority — but none of that is part of
+a build or a run.
 
 See `Sources/DodomaCore/Resources/LICENSES.md` for attribution.
 
