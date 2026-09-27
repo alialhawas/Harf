@@ -209,7 +209,8 @@ public enum FixDecision {
         guards: GuardResult,
         policy: AppPolicy = .normal,
         aggressiveness: Aggressiveness = .balanced,
-        confidentScore: Double? = nil
+        confidentScore: Double? = nil,
+        trailingTokenSettled: Bool = false
     ) -> Decision {
         analyse(
             region: region,
@@ -218,7 +219,8 @@ public enum FixDecision {
             models: models,
             guards: guards,
             policy: policy,
-            aggressiveness: aggressiveness, confidentScore: confidentScore
+            aggressiveness: aggressiveness, confidentScore: confidentScore,
+            trailingTokenSettled: trailingTokenSettled
         ).decision
     }
 
@@ -230,7 +232,8 @@ public enum FixDecision {
         guards: GuardResult,
         policy: AppPolicy = .normal,
         aggressiveness: Aggressiveness = .balanced,
-        confidentScore: Double? = nil
+        confidentScore: Double? = nil,
+        trailingTokenSettled: Bool = false
     ) -> FixAnalysis {
         let thresholds = aggressiveness.thresholds.withConfidentScore(confidentScore)
         let current = models.current.combined(region.typedText)
@@ -267,7 +270,8 @@ public enum FixDecision {
             fix: fix,
             guards: guards,
             policy: policy,
-            thresholds: thresholds)
+            thresholds: thresholds,
+            trailingTokenSettled: trailingTokenSettled)
 
         return FixAnalysis(
             decision: decision,
@@ -283,6 +287,11 @@ public enum FixDecision {
 
     /// The gate ladder, isolated from scoring so it can be table-driven with
     /// synthetic `Score` values at the threshold boundaries.
+    ///
+    /// - Parameter trailingTokenSettled: the buffer has been untouched for
+    ///   `TypingSession.settledDelay`, so the unfinished token at the caret may
+    ///   be read as finished. Waives the completion requirement on the
+    ///   confident branch and nothing else.
     static func verdict(
         region: CandidateRegion,
         current: Score,
@@ -290,7 +299,8 @@ public enum FixDecision {
         fix: Fix,
         guards: GuardResult,
         policy: AppPolicy,
-        thresholds: Thresholds
+        thresholds: Thresholds,
+        trailingTokenSettled: Bool = false
     ) -> Decision {
         let gap = alternate.combined - current.combined
         let lengthOK = region.letterCount >= Thresholds.autoMinLetters
@@ -302,13 +312,23 @@ public enum FixDecision {
         // identifier or a recently undone fix still blocks, because those say
         // the text is not prose at all rather than that it is merely brief.
         //
-        // A finished token is still required. The score is read from what has
-        // been typed so far, and a three-letter fragment of a word the user is
-        // in the middle of scores as a certainty about the wrong word — a
-        // rewrite there lands under the caret mid-keystroke and switches the
-        // layout out from under the rest of the word.
+        // A finished token is still required, and there are two ways to be
+        // finished. The ordinary one is a whitespace key: the score is read
+        // from what has been typed so far, and a three-letter fragment of a
+        // word the user is in the middle of scores as a certainty about the
+        // wrong word — a rewrite there lands under the caret mid-keystroke and
+        // switches the layout out from under the rest of the word.
+        //
+        // The other is time. `trailingTokenSettled` says the buffer has stood
+        // untouched for `TypingSession.settledDelay`, which nobody does between
+        // two letters of one word, so the word is finished in every sense but
+        // the punctuation. That is the only gate the second pass relaxes:
+        // `autoAllowed` above still demands a real space, because the ordinary
+        // ladder takes six letters on scores far short of this branch's, and
+        // over 5,077 measured half-typed prefixes 4,386 of them would be
+        // rewritten mid-word if completion were merely implied.
         if policy == .normal,
-           completedOK,
+           completedOK || trailingTokenSettled,
            let confident = thresholds.confidentScore,
            alternate.combined >= confident,
            gap >= Thresholds.confidentMinGap,

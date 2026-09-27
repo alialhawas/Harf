@@ -89,6 +89,21 @@ public final class TypingSession {
     /// it and re-checks with `isEvaluationDue` when its timer fires.
     public static let triggerDelay: TimeInterval = 1.0
 
+    /// Quiet period after which a buffer the first evaluation left alone is
+    /// looked at one more time, with the unfinished token at the caret treated
+    /// as finished.
+    ///
+    /// The number is the whole argument. A second is not evidence of anything:
+    /// it cannot tell a word the user has finished from one they are pausing in
+    /// the middle of, which is why the confident gate insists on a token some
+    /// whitespace key actually completed. Three seconds can: nobody
+    /// stops that long between two letters of the same word, so silence of that
+    /// length says the word is as finished as it is going to get, space or no
+    /// space. It has to stay well under `BufferResetPolicy.idleTimeout` too —
+    /// past that the buffer has been discarded and there is nothing left to
+    /// look at. `EvaluationTriggerTests` pins the ordering.
+    public static let settledDelay: TimeInterval = 3.0
+
     private let buffer = TypedBuffer()
     private var lastKeyTimestamp: TimeInterval?
     private var frontmostBundleID: String?
@@ -111,8 +126,13 @@ public final class TypingSession {
     /// Pure, and inclusive at the boundary: a timer scheduled exactly
     /// `triggerDelay` after the keystroke must find the evaluation due, or the
     /// trigger would need a second round to ever fire.
-    public static func isEvaluationDue(lastKeyTimestamp: TimeInterval, now: TimeInterval) -> Bool {
-        now - lastKeyTimestamp >= triggerDelay
+    ///
+    /// - Parameter delay: the quiet period being waited out. `settledDelay` for
+    ///   the second pass; the default is the ordinary trigger.
+    public static func isEvaluationDue(
+        lastKeyTimestamp: TimeInterval, now: TimeInterval, after delay: TimeInterval = triggerDelay
+    ) -> Bool {
+        now - lastKeyTimestamp >= delay
     }
 
     /// Runs the detection engine over the current buffer. Nil when there is
@@ -139,7 +159,8 @@ public final class TypingSession {
         policy: AppPolicy,
         aggressiveness: Aggressiveness,
         confidentScore: Double? = nil,
-        recentlyUndone: Set<String> = []
+        recentlyUndone: Set<String> = [],
+        trailingTokenSettled: Bool = false
     ) -> Detector.Detection? {
         let keys = buffer.keys
         guard !keys.isEmpty else { return nil }
@@ -148,7 +169,7 @@ public final class TypingSession {
             typedLanguage: Detector.scriptLanguage(of: buffer.currentText),
             policy: policy,
             aggressiveness: aggressiveness, confidentScore: confidentScore,
-            recentlyUndone: recentlyUndone)
+            recentlyUndone: recentlyUndone, trailingTokenSettled: trailingTokenSettled)
     }
 
     /// Drops the buffer from outside the input stream.

@@ -47,7 +47,8 @@ public struct Detector: Sendable {
         policy: AppPolicy = .normal,
         aggressiveness: Aggressiveness = .balanced,
         confidentScore: Double? = nil,
-        recentlyUndone: Set<String> = []
+        recentlyUndone: Set<String> = [],
+        trailingTokenSettled: Bool = false
     ) -> Detection {
         let alternateLanguage: Language = typedLanguage == .english ? .arabic : .english
         let currentLayout = layout(for: typedLanguage)
@@ -76,7 +77,8 @@ public struct Detector: Sendable {
             models: models,
             guards: guards,
             policy: policy,
-            aggressiveness: aggressiveness, confidentScore: confidentScore)
+            aggressiveness: aggressiveness, confidentScore: confidentScore,
+            trailingTokenSettled: trailingTokenSettled)
 
         return Detection(
             typedLanguage: typedLanguage, region: region, analysis: analysis,
@@ -92,6 +94,7 @@ public struct Detector: Sendable {
         aggressiveness: Aggressiveness = .balanced,
         confidentScore: Double? = nil,
         recentlyUndone: Set<String> = [],
+        trailingTokenSettled: Bool = false,
         keyboardType: UInt32? = nil
     ) -> Detection? {
         let language = typedLanguage ?? Self.scriptLanguage(of: text)
@@ -102,7 +105,7 @@ public struct Detector: Sendable {
         return detect(
             keys: keys, typedLanguage: language, policy: policy,
             aggressiveness: aggressiveness, confidentScore: confidentScore,
-            recentlyUndone: recentlyUndone)
+            recentlyUndone: recentlyUndone, trailingTokenSettled: trailingTokenSettled)
     }
 
     /// Which layout the text was most likely typed under, from its script
