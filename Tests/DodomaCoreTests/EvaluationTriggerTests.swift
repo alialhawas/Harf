@@ -25,6 +25,33 @@ final class EvaluationTriggerTests: XCTestCase {
         XCTAssertTrue(TypingSession.isEvaluationDue(lastKeyTimestamp: last, now: last + 5))
     }
 
+    /// The second pass has to fit in the window between the first evaluation
+    /// and the point at which there is nothing left to evaluate. Asserted as an
+    /// ordering rather than as three numbers so that moving any one of them
+    /// into an inconsistent state fails here rather than in the field.
+    func testTheSettledDelaySitsBetweenTheTriggerAndTheIdleTimeout() {
+        XCTAssertEqual(TypingSession.settledDelay, 3.0)
+        XCTAssertLessThan(
+            TypingSession.triggerDelay, TypingSession.settledDelay,
+            "the second pass must come after the first, not instead of it")
+        XCTAssertLessThan(
+            TypingSession.settledDelay, BufferResetPolicy.idleTimeout,
+            "a buffer that has already been discarded cannot be looked at again")
+    }
+
+    func testTheSettledPassIsDueExactlyAtTheSettledDelay() {
+        let last: TimeInterval = 500
+
+        XCTAssertFalse(
+            TypingSession.isEvaluationDue(
+                lastKeyTimestamp: last, now: last + 2.999, after: TypingSession.settledDelay))
+        // Inclusive at the boundary, for the same reason the first trigger is:
+        // the work item is scheduled for exactly this instant.
+        XCTAssertTrue(
+            TypingSession.isEvaluationDue(
+                lastKeyTimestamp: last, now: last + 3.0, after: TypingSession.settledDelay))
+    }
+
     func testTypingRefreshesTheTimestampTheTriggerReadsFrom() throws {
         let session = TypingSession(frontmostBundleID: "com.apple.TextEdit")
         session.handle(.key(CapturedKey(keycode: 4, producedText: "h", timestamp: 100)))

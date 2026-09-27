@@ -25,7 +25,8 @@ final class DecisionGateTests: XCTestCase {
         tokens: Int = 2,
         guards: GuardResult = GuardResult(vetoes: []),
         policy: AppPolicy = .normal,
-        thresholds: Thresholds = .balanced
+        thresholds: Thresholds = .balanced,
+        trailingTokenSettled: Bool = false
     ) -> String {
         let typedText = Array(repeating: "aaaaa", count: max(tokens, 1)).joined(separator: " ")
         let region = CandidateRegion(
@@ -42,7 +43,7 @@ final class DecisionGateTests: XCTestCase {
             capsMode: .asTyped)
         switch FixDecision.verdict(
             region: region, current: cur, alternate: alt, fix: fix, guards: guards,
-            policy: policy, thresholds: thresholds)
+            policy: policy, thresholds: thresholds, trailingTokenSettled: trailingTokenSettled)
         {
         case .ignore: return "ignore"
         case .suggest: return "suggest"
@@ -284,5 +285,89 @@ final class DecisionGateTests: XCTestCase {
         XCTAssertLessThan(alt.combined, Thresholds.eager.autoAlt)
         XCTAssertEqual(verdict(alt: alt, cur: cur, thresholds: .eager), "autoApply")
         XCTAssertEqual(verdict(alt: alt, cur: cur, thresholds: .conservative), "suggest")
+    }
+
+    // MARK: - The settled trailing token
+
+    /// The second pass, three seconds after the last keystroke. A
+    /// word nobody has touched for that long is finished whether or not a space
+    /// followed it, so the confident gate accepts it — and only the confident
+    /// gate, which already demands a separation the ordinary ladder does not.
+    func testASettledTrailingTokenLetsAConfidentFixThroughWithoutASpace() {
+        XCTAssertEqual(
+            verdict(alt: score(0.95), cur: score(0.10), letters: 3, completed: 0, tokens: 1,
+                    guards: GuardResult(vetoes: [.shortSingleToken]),
+                    thresholds: .balanced.withConfidentScore(0.90),
+                    trailingTokenSettled: true),
+            "autoApply")
+    }
+
+    /// The same region one second in, which is where the first evaluation sees
+    /// it. A pause that short is indistinguishable from hesitating mid-word, and
+    /// three letters are below the suggestion floor as well, so nothing at all
+    /// happens — which is exactly the standing `اثغ` the second pass exists for.
+    func testTheSameRegionIsIgnoredBeforeItHasSettled() {
+        XCTAssertEqual(
+            verdict(alt: score(0.95), cur: score(0.10), letters: 3, completed: 0, tokens: 1,
+                    guards: GuardResult(vetoes: [.shortSingleToken]),
+                    thresholds: .balanced.withConfidentScore(0.90),
+                    trailingTokenSettled: false),
+            "ignore")
+    }
+
+    /// The flag waives completion for the confident gate and for nothing else.
+    /// The ordinary automatic ladder still wants a token some whitespace key
+    /// genuinely finished: of 5,077 measured half-typed prefixes, 4,386 would
+    /// be rewritten mid-word without that requirement.
+    func testASettledTrailingTokenDoesNotOpenTheOrdinaryAutoPath() {
+        XCTAssertEqual(
+            verdict(alt: score(0.75), cur: score(0.00), letters: 6, completed: 0,
+                    trailingTokenSettled: true),
+            "suggest", "no confident threshold, so only the length ladder could take it")
+        XCTAssertEqual(
+            verdict(alt: score(0.75), cur: score(0.00), letters: 6, completed: 0,
+                    thresholds: .balanced.withConfidentScore(0.90),
+                    trailingTokenSettled: true),
+            "suggest", "0.75 is under the confident bar, so completion is still required")
+    }
+
+    /// The important negative. Settling says the word is finished; it says
+    /// nothing about whether the text is prose, and every guard that answers
+    /// that question still blocks.
+    func testASettledTrailingTokenDoesNotWaiveTheGuards() {
+        for veto in [
+            GuardReason.urlOrPath, .identifierCase, .digitsAdjacent, .mixedScriptToken,
+            .recentlyUndone,
+        ] {
+            XCTAssertEqual(
+                verdict(alt: score(0.99), cur: score(0.02), letters: 4, completed: 0, tokens: 1,
+                        guards: GuardResult(vetoes: [.shortSingleToken, veto]),
+                        thresholds: .balanced.withConfidentScore(0.90),
+                        trailingTokenSettled: true),
+                "ignore", "\(veto.rawValue) must still block")
+        }
+    }
+
+    /// And the rest of the confident branch is untouched: the score, the
+    /// separation and the letter floor all still apply to a settled token.
+    func testASettledTrailingTokenStillObeysTheConfidentBar() {
+        XCTAssertEqual(
+            verdict(alt: score(0.89), cur: score(0.02), letters: 4, completed: 0, tokens: 1,
+                    guards: GuardResult(vetoes: [.shortSingleToken]),
+                    thresholds: .balanced.withConfidentScore(0.90),
+                    trailingTokenSettled: true),
+            "suggest", "under confidentScore")
+        XCTAssertEqual(
+            verdict(alt: score(0.95), cur: score(0.60), letters: 4, completed: 0, tokens: 1,
+                    guards: GuardResult(vetoes: [.shortSingleToken]),
+                    thresholds: .balanced.withConfidentScore(0.90),
+                    trailingTokenSettled: true),
+            "suggest", "under confidentMinGap")
+        XCTAssertEqual(
+            verdict(alt: score(0.99), cur: score(0.02), letters: 2, completed: 0, tokens: 1,
+                    guards: GuardResult(vetoes: [.shortSingleToken]),
+                    thresholds: .balanced.withConfidentScore(0.90),
+                    trailingTokenSettled: true),
+            "ignore", "under confidentMinLetters")
     }
 }

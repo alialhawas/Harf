@@ -288,6 +288,14 @@ final class PipelineHarness {
     /// Fulfilled by the next flip that lands. See `awaitFlipCard`.
     private var flipWaiter: XCTestExpectation?
 
+    /// This person's own vocabulary, in memory.
+    ///
+    /// Injected rather than left to the pipeline's default, which is the real
+    /// file in the real Application Support directory: a test that typed
+    /// learnable prose would otherwise write counts into the vocabulary of
+    /// whoever ran the suite.
+    let lexicon = UserLexicon(url: nil)
+
     /// - Parameter axVerifySkip: seeded into the settings blob before the store
     ///   reads it, because there is no setter for it — it is a hand-edited
     ///   preference by design.
@@ -306,6 +314,7 @@ final class PipelineHarness {
             secureInput: secureInput,
             suggestionState: suggestionState,
             cardFrames: cardFrames,
+            lexicon: lexicon,
             fixEngine: engine,
             focus: oracle)
 
@@ -449,6 +458,34 @@ final class PipelineHarness {
     func waitForTrigger(_ test: XCTestCase, timeout: TimeInterval = 5) {
         let fired = test.expectation(description: "the idle trigger fired")
         pipeline.queue.asyncAfter(deadline: .now() + TypingSession.triggerDelay + 0.2) {
+            fired.fulfill()
+        }
+        test.wait(for: [fired], timeout: timeout)
+        drain()
+    }
+
+    /// The second pass's delay, as the tests run it.
+    ///
+    /// The shipped 3 seconds is a statement about human pauses, and waiting
+    /// it out in every test that touches the retry would add most of a minute
+    /// to the suite for no extra coverage. What the pipeline actually depends
+    /// on is the ordering — the retry comes after the first evaluation, not
+    /// instead of it — and this preserves that. The constant itself is pinned
+    /// by `EvaluationTriggerTests`.
+    static let shortSettledDelay: TimeInterval = 1.6
+
+    /// Installs `shortSettledDelay`. `queue.sync` because the seam is read on
+    /// the pipeline queue.
+    func useShortSettledDelay() {
+        pipeline.queue.sync { pipeline.settledDelay = Self.shortSettledDelay }
+    }
+
+    /// Waits out the second pass, measured from now rather than from the last
+    /// keystroke: the caller has already waited out the first trigger, so this
+    /// overshoots, which is the safe direction.
+    func waitForSettledPass(_ test: XCTestCase, timeout: TimeInterval = 10) {
+        let fired = test.expectation(description: "the settled pass fired")
+        pipeline.queue.asyncAfter(deadline: .now() + Self.shortSettledDelay + 0.2) {
             fired.fulfill()
         }
         test.wait(for: [fired], timeout: timeout)

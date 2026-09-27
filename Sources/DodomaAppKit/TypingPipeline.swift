@@ -120,6 +120,13 @@ final class TypingPipeline {
 
     /// Queue-confined state.
     private var pendingEvaluation: DispatchWorkItem?
+    /// Whether this burst of typing has already had its second look.
+    ///
+    /// Set when the settled pass is armed rather than when it runs, so that a
+    /// pass which itself ignores the buffer cannot arm another: the retry is
+    /// one per burst, and `armTrigger()` — which every keystroke reaches — is
+    /// the only thing that clears it.
+    private var settledPassUsed = false
     /// The last refusal reported, so the same one is not reported again.
     /// Queue-confined, like everything the evaluation reads.
     private var skipLedger = SkipLedger()
@@ -578,6 +585,9 @@ final class TypingPipeline {
 
     private func armTrigger() {
         cancelTrigger()
+        // A keystroke starts the burst over, so the second look is on the table
+        // again — for the text as it now stands.
+        settledPassUsed = false
         if let refusal = Self.evaluationRefusal(
             captureActive: captureActive, isApplying: isApplying, isGating: isGating,
             isSuppressed: isSuppressed)
@@ -635,6 +645,76 @@ final class TypingPipeline {
         evaluate()
     }
 
+    /// Schedules the one further evaluation a buffer gets after being left
+    /// alone, at `settledDelay` from the last keystroke. Queue-confined.
+    ///
+    /// The first evaluation runs a second after the user stops, and a second of
+    /// silence says nothing: it is as consistent with a finished word as with a
+    /// pause in the middle of one, which is why the confident gate will not take
+    /// a token no whitespace key completed. Three and a half seconds is not
+    /// ambiguous, so the buffer is offered once more with that token read as
+    /// finished — and once only, which is what `settledPassUsed` enforces.
+    private func armSettledPass() {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard !settledPassUsed, !session.isBufferEmpty else { return }
+        guard let last = session.lastKeyTime else { return }
+        cancelTrigger()
+        // The same refusals arming the ordinary trigger honours, in the same
+        // order. Nothing about a second look makes a paused app, a secure field
+        // or an apply in flight any more willing to be evaluated.
+        if let refusal = Self.evaluationRefusal(
+            captureActive: captureActive, isApplying: isApplying, isGating: isGating,
+            isSuppressed: isSuppressed)
+        {
+            noteSkipped(refusal, phrased: "second pass not armed")
+            return
+        }
+
+        settledPassUsed = true
+        let work = DispatchWorkItem { [weak self] in
+            self?.settledTriggerFired()
+        }
+        pendingEvaluation = work
+        let remaining = settledDelay - (Self.now() - last)
+        queue.asyncAfter(deadline: .now() + max(remaining, 0.001), execute: work)
+    }
+
+    private func settledTriggerFired() {
+        dispatchPrecondition(condition: .onQueue(queue))
+        pendingEvaluation = nil
+        // `isSuppressed` deliberately absent, exactly as in `triggerFired()`.
+        if let refusal = Self.evaluationRefusal(
+            captureActive: captureActive, isApplying: isApplying, isGating: isGating,
+            isSuppressed: false)
+        {
+            noteSkipped(refusal)
+            return
+        }
+        guard let last = session.lastKeyTime else {
+            noteSkipped(.nothingTyped)
+            return
+        }
+
+        // The timestamp is the authority here too: a key may have landed between
+        // the arming and this block being dequeued. That key will have armed the
+        // ordinary trigger and cleared `settledPassUsed`, so the honest thing is
+        // to wait out the remainder rather than evaluate text the user is still
+        // adding to.
+        let now = Self.now()
+        guard
+            TypingSession.isEvaluationDue(lastKeyTimestamp: last, now: now, after: settledDelay)
+        else {
+            let remaining = settledDelay - (now - last)
+            let work = DispatchWorkItem { [weak self] in
+                self?.settledTriggerFired()
+            }
+            pendingEvaluation = work
+            queue.asyncAfter(deadline: .now() + max(remaining, 0.001), execute: work)
+            return
+        }
+        evaluate(trailingTokenSettled: true)
+    }
+
     // MARK: - Evaluation
 
     /// Counts the words of a run the detector examined and left alone.
@@ -681,7 +761,9 @@ final class TypingPipeline {
         }
     }
 
-    private func evaluate() {
+    /// - Parameter trailingTokenSettled: true only for the second pass. See
+    ///   `armSettledPass()`; the decision function is where it is read.
+    private func evaluate(trailingTokenSettled: Bool = false) {
         dispatchPrecondition(condition: .onQueue(queue))
 
         let bundleID = session.currentFrontmostBundleID
@@ -751,14 +833,19 @@ final class TypingPipeline {
             let detection = session.evaluate(
                 detector: detector, policy: policy, aggressiveness: settings.aggressiveness,
                 confidentScore: settings.confidentScore,
-                recentlyUndone: undoSuppression.texts(bundleID: bundleID, at: now))
+                recentlyUndone: undoSuppression.texts(bundleID: bundleID, at: now),
+                trailingTokenSettled: trailingTokenSettled)
         else {
             noteSkipped(.emptyBuffer)
             return
         }
         let duration = Self.now() - started
 
-        learnVocabulary(from: detection, using: detector)
+        // Not on the second pass. It is the same buffer the first evaluation
+        // already read, so counting its words again would be one pause in the
+        // typing masquerading as two sightings — and ten sightings is what a
+        // word needs to join this person's dictionary.
+        if !trailingTokenSettled { learnVocabulary(from: detection, using: detector) }
 
         let snapshot = DecisionSnapshot(
             detection: detection, policy: policy, bundleID: bundleID, duration: duration,
@@ -1006,7 +1093,11 @@ final class TypingPipeline {
             beginApply(fix, bundleID: bundleID, verifiedAt: serial, kind: .auto)
 
         case .nothing:
-            break
+            // The detector looked and left the text alone. If it did so because
+            // the word at the caret was not finished with a space, a longer
+            // silence is the only thing that can change the answer — so the
+            // buffer gets exactly one more look, and no more.
+            armSettledPass()
         }
     }
 
@@ -2067,6 +2158,12 @@ final class TypingPipeline {
     /// the suite, so whether the recovery re-arms would depend on the tester's
     /// System Settings rather than on the code.
     var layoutRefresh: (() -> Bool)?
+
+    /// How long the second pass waits. The shipped `TypingSession.settledDelay`
+    /// everywhere but the tests, which cannot afford three seconds
+    /// of real time per case and are testing the ordering rather than the
+    /// number. Queue-confined, like everything the trigger reads.
+    var settledDelay: TimeInterval = TypingSession.settledDelay
 
     /// The pair the evaluation and the flip both resolve against, from the seam
     /// when a test installed one and from the shared cache otherwise.
