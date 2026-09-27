@@ -16,7 +16,7 @@ what is on screen and types the correction in its place, switching the keyboard
 layout as it goes.
 
 It runs as a background agent with no Dock icon, does no networking of any kind,
-and keeps everything it observes on the machine. Version 1.0.0, macOS 14 or
+and keeps everything it observes on the machine. Version 1.0.1, macOS 14 or
 newer.
 
 ## Why this exists
@@ -736,7 +736,7 @@ Two escape hatches, both for development:
 `harf --status` prints every setting, permission and list in full:
 
 ```
-Harf 1.0.0
+Harf 1.0.1
 
   running          yes (process 4321)
   accessibility    yes

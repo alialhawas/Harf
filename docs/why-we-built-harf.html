@@ -1,0 +1,644 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="description" content="Between everyday emails, client conversations, and coding, our work moves between Arabic and English. How Harf recovers text typed with the wrong keyboard layout.">
+  <meta property="og:title" content="From client conversations to code. Why we built Harf.">
+  <meta property="og:description" content="Between everyday emails, client conversations, and coding, our work moves between Arabic and English. How Harf recovers text typed with the wrong keyboard layout.">
+  <meta property="og:type" content="article">
+  <title>From client conversations to code. Why we built Harf.</title>
+  <link rel="icon" href="assets/hatif-logo-mark.svg" type="image/svg+xml">
+  <style>
+    @font-face{font-family:Suisse Intl;src:url('assets/fonts/SuisseIntl-Regular.otf') format('opentype');font-weight:400;font-display:swap}
+    @font-face{font-family:Suisse Intl;src:url('assets/fonts/SuisseIntl-Medium.otf') format('opentype');font-weight:500 700;font-display:swap}
+    @font-face{font-family:IBM Plex Sans Arabic;src:url('assets/fonts/IBMPlexSansArabic-Regular.ttf') format('truetype');font-weight:400 500;font-display:swap}
+    @font-face{font-family:IBM Plex Sans Arabic;src:url('assets/fonts/IBMPlexSansArabic-SemiBold.ttf') format('truetype');font-weight:550 700;font-display:swap}
+    :root{color-scheme:light;--bg:#fff;--panel:#fbfbfb;--ink:#1a1a1a;--text:#444;--muted:#636363;--line:#e8e4eb;--accent:#387a6c;--primary:#499b89;--secondary:#5642ca;--mono:ui-monospace,SFMono-Regular,Consolas,monospace;--sans:'IBM Plex Sans Arabic',-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;--heading:'Suisse Intl',var(--sans)}
+    *{box-sizing:border-box}
+    html{scroll-behavior:smooth;scroll-padding-top:105px}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:17px;line-height:1.8;-webkit-font-smoothing:antialiased}
+    ::selection{background:var(--accent);color:var(--bg)}
+    a{color:var(--ink);text-underline-offset:5px;text-decoration-color:#59624c}
+    a:hover{color:var(--accent)}
+    button,a{-webkit-tap-highlight-color:transparent}
+    button{font:inherit;cursor:pointer}
+    button:disabled{cursor:wait;opacity:.65}
+    :focus-visible{outline:2px solid var(--accent);outline-offset:5px}
+    .skip{position:absolute;left:20px;top:-80px;z-index:100;background:var(--accent);color:var(--bg);padding:8px 18px}
+    .skip:focus{top:10px}
+    .site-header{height:82px;border-bottom:1px solid var(--line)}
+    .nav{max-width:1180px;margin:auto;padding:0 32px;display:flex;height:100%;align-items:center;gap:28px}
+    .brand{display:inline-flex;align-items:center;gap:12px;text-decoration:none;font-size:23px;font-weight:650;letter-spacing:-1px}
+    .brand-mark{display:grid;place-items:center;width:34px;height:34px;border:1px solid #66724b;border-radius:7px;color:var(--accent);font-size:26px;line-height:1;font-weight:500;letter-spacing:0}
+    .nav-label{font:12px var(--mono);letter-spacing:.06em;color:var(--muted);padding-inline-start:26px;border-inline-start:1px solid var(--line)}
+    .nav-links{display:flex;align-items:center;gap:28px;margin-inline-start:auto;font:12px var(--mono)}
+    .nav-links a{text-decoration:none}
+    .nav-links .install-link{border:1px solid #5b6448;padding:9px 14px;color:var(--accent)}
+    .page-grid{max-width:1180px;margin:0 auto;padding:0 32px;display:grid;grid-template-columns:180px minmax(0,728px);column-gap:56px;align-items:start}
+    .toc{position:sticky;top:54px;padding-top:94px;font:12px/1.5 var(--mono)}
+    .eyebrow{font:11px/1.5 var(--mono);text-transform:uppercase;letter-spacing:.13em;color:var(--muted)}
+    .toc .eyebrow{margin:0 0 23px}
+    .toc a{display:block;padding-block:10px;padding-inline-start:15px;color:var(--muted);text-decoration:none;border-inline-start:1px solid var(--line);transition:color .2s,border-color .2s}
+    .toc a[aria-current="location"],.toc a:hover{color:var(--accent);border-color:var(--accent)}
+    .toc-note{margin-top:28px;padding-inline-start:16px;font-size:10px;color:var(--muted)}
+    article{min-width:0;padding:88px 0 0}
+    .article-header .eyebrow{color:var(--accent);display:flex;align-items:center;gap:10px}
+    .article-header .eyebrow::before{content:"";width:6px;height:6px;background:var(--accent);border-radius:50%}
+    h1,h2,h3{color:var(--ink);font-family:var(--heading);font-weight:500;line-height:1.16}
+    h1{font-size:clamp(38px,4.3vw,59px);letter-spacing:-2.8px;margin:24px 0 26px;text-wrap:balance}
+    h1 span{color:var(--ink)}
+    .dek{font-size:19px;line-height:1.7;max-width:630px;margin-bottom:28px}
+    .byline{display:flex;align-items:center;gap:12px;font:11px/1.5 var(--mono);color:var(--muted);padding-bottom:38px;border-bottom:1px solid var(--line)}
+    .byline strong{color:var(--text);font-weight:400}
+    .avatar{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:#262b20;color:var(--accent);font:12px var(--mono)}
+    .dot{color:#555c4b}
+    section{padding-top:52px;scroll-margin-top:20px}
+    h2{font-size:30px;letter-spacing:-.8px;margin:0 0 24px}
+    h3{font-size:20px;letter-spacing:-.3px;margin:0 0 10px}
+    p{margin:0 0 22px}
+    strong{color:var(--ink);font-weight:550}
+    .opening{font-size:20px;color:var(--ink);line-height:1.65}
+    .pullquote{border-inline-start:2px solid var(--accent);padding-block:3px;padding-inline-start:23px;margin:34px 0;color:var(--ink);font-size:23px;line-height:1.5;letter-spacing:-.5px}
+    .architecture,.demo{margin:46px -38px 30px}
+    .diagram-viewport{overflow-x:auto;padding:8px 10px 12px 0;scrollbar-width:thin;scrollbar-color:#555 #191919}
+    .architecture img{display:block;width:100%;min-width:640px;height:auto}
+    .diagram-caption{margin:14px 0 0;font:11px/1.7 var(--mono);color:var(--muted);display:flex;justify-content:space-between;gap:20px}
+    .diagram-caption strong{font-weight:400;color:var(--ink)}
+    .swipe-note{display:none;font:11px var(--mono);color:var(--muted);margin-top:12px}
+    .demo-top{display:flex;justify-content:space-between;align-items:center;gap:15px;margin-bottom:25px}
+    .demo-label{font:11px var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+    .direction{display:flex;gap:6px}
+    .direction button,.replay,.step-button{border:1px solid #4b4d4a;background:#161616;color:var(--text);font:11px var(--mono);padding:9px 11px;min-height:36px}
+    .direction button[aria-pressed="true"]{color:var(--accent);border-color:#927a0b;background:#211e0e}
+    .demo-stage{position:relative;min-width:640px;padding:12px 8px 8px 2px}
+    .bevel{position:relative;background:#161616;border:1px solid #4b4d4a;--bevel-top:#242424;--bevel-side:#1a1a1a;--bevel-line:#4b4d4a}
+    .bevel::before{content:"";position:absolute;left:-1px;right:-1px;top:-7px;height:6px;background:var(--bevel-top);border:1px solid var(--bevel-line);transform:skewX(-58deg);transform-origin:bottom}
+    .bevel::after{content:"";position:absolute;top:-1px;bottom:-1px;right:-11px;width:10px;background:var(--bevel-side);border:1px solid var(--bevel-line);transform:skewY(-32deg);transform-origin:left}
+    .buffer-node{width:72%;margin:0 auto;padding:17px 18px}
+    .node-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;font:12px var(--mono);color:var(--ink)}
+    .node-heading span{font-size:10px;color:var(--muted)}
+    .buffer-keys{display:flex;gap:4px;margin-top:16px;min-height:30px}
+    .buffer-keys span{flex:1;display:grid;place-items:center;min-width:0;height:30px;border:1px solid #45463f;background:#1c1c1c;font:12px var(--mono);color:#bfc0b8}
+    .diagram-branches{display:block;width:100%;height:66px;overflow:visible}
+    .diagram-branches path{fill:none;stroke:#62635c;stroke-width:1;stroke-dasharray:4 5;vector-effect:non-scaling-stroke}
+    .diagram-branches circle{fill:var(--accent);opacity:0}
+    .readings{display:grid;grid-template-columns:1fr 1fr;gap:32px}
+    .reading-node{padding:17px 18px;transition:background .25s,border-color .25s}
+    .reading-title{display:flex;justify-content:space-between;font:12px var(--mono);color:var(--ink);margin-bottom:19px}
+    .reading-title span{color:var(--blue)}
+    .reading-meta{font:10px var(--mono);color:var(--muted);margin:0 0 7px}
+    .reading-text{display:block;width:100%;padding:13px 8px;margin:0;border:1px solid #373934;background:#1a1a1a;text-align:center;font:19px/1.7 var(--mono);color:var(--ink)}
+    .reading-text[lang="ar"]{font-family:Tahoma,Arial,sans-serif;font-size:24px;padding-block:9px}
+    .reading-score{display:flex;justify-content:space-between;margin-top:13px;font:10px var(--mono);color:var(--muted)}
+    .reading-score b{font-weight:400;color:var(--text)}
+    .reading-node.winner{border-color:#00aeef;--bevel-line:#00aeef;--bevel-top:#073a50;--bevel-side:#08252f;background:#112027}
+    .reading-node.winner .reading-text{border-color:#206079;background:#0c2834;color:#7cdbff}
+    .gate-node{width:51%;margin:0 auto;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px;font:12px var(--mono);color:var(--ink)}
+    .gate-node span{font-size:10px;color:var(--muted)}
+    .gate-node.passed{border-color:#fbca00;--bevel-line:#fbca00;--bevel-top:#3b3200;--bevel-side:#211c00;background:#262208}
+    .output-wire{height:36px;width:1px;border-left:1px dashed #777;margin:auto}
+    .editor{width:72%;margin:0 auto;padding:14px 18px}
+    .editor-bar{display:flex;justify-content:space-between;align-items:center;font:10px var(--mono);color:var(--muted)}
+    .layout-pill{color:var(--muted)}
+    .demo-text{min-height:67px;display:flex;align-items:center;justify-content:center;font:22px/1.5 var(--mono);color:var(--ink);padding-top:12px;overflow-wrap:anywhere}
+    .demo-text.corrected{color:var(--accent)}
+    .demo-text [lang="ar"]{font-family:Tahoma,Arial,sans-serif;letter-spacing:0;font-size:28px}
+    .demo-result{min-height:48px;font:12px/1.7 var(--mono);color:var(--muted);padding-top:17px}
+    .demo-bottom{padding-top:15px;display:flex;align-items:center;justify-content:space-between;gap:14px}
+    .steps{display:flex;flex-wrap:wrap;gap:6px;list-style:none;padding:0;margin:0}
+    .step-button{color:var(--muted);padding:9px;font-size:10px}
+    .steps li.active .step-button{color:var(--accent);border-color:#927a0b}
+    .replay{white-space:nowrap}
+    .replay:hover,.step-button:hover{color:var(--ink);border-color:#8a8d83}
+    .demo[data-step="type"] .buffer-node{border-color:var(--accent);--bevel-line:#fbca00}
+    .demo[data-step="compare"] .to-layouts path,.demo[data-step="check"] .to-gate path{stroke:var(--accent);animation:signal-flow 1.2s linear infinite}
+    .demo[data-step="compare"] .to-layouts circle,.demo[data-step="check"] .to-gate circle{opacity:1}
+    .demo[data-step="fix"] .output-wire{border-color:var(--accent)}
+    @keyframes signal-flow{to{stroke-dashoffset:-18}}
+    .caption{font-size:12px;line-height:1.7;color:var(--muted)}
+    .mechanism{padding:0;margin:30px 0;list-style:none;counter-reset:mechanism}
+    .mechanism li{position:relative;padding-bottom:26px;padding-inline-start:52px;counter-increment:mechanism}
+    .mechanism li:not(:last-child)::after{content:"";position:absolute;inset-inline-start:14px;top:34px;bottom:8px;border-inline-start:1px solid var(--line)}
+    .mechanism li::before{content:"0" counter(mechanism);position:absolute;inset-inline-start:0;top:0;font:11px var(--mono);color:var(--accent);width:29px;height:29px;border:1px solid #465035;display:grid;place-items:center;border-radius:50%}
+    .mechanism p{margin:0;font-size:16px}
+    .aside{padding:22px 24px;border:1px solid var(--line);background:#161914;margin:28px 0;font-size:15px}
+    .aside strong{display:block;margin-bottom:8px;font-size:16px;color:var(--accent)}
+    .aside p:last-child{margin-bottom:0}
+    .controls{margin:29px 0;border-top:1px solid var(--line)}
+    .control-row{display:grid;grid-template-columns:135px 1fr;gap:20px;border-bottom:1px solid var(--line);padding:17px 0;font-size:15px}
+    .control-row p{margin:0}
+    .control-row dt{color:var(--ink)}
+    .control-row dd{margin:0}
+    kbd{font:12px var(--mono);border:1px solid #414837;border-radius:3px;background:#20241b;padding:4px 7px;white-space:nowrap;color:var(--ink)}
+    code{font: .85em/1.7 var(--mono);color:var(--ink)}
+    p code{background:#25291f;padding:2px 5px;border-radius:3px;overflow-wrap:anywhere}
+    .install-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 24px}
+    .install-heading h2{margin:0}
+    .os-note{font:10px var(--mono);color:var(--muted);white-space:nowrap}
+    .code-block{border:1px solid #3d4532;border-radius:5px;overflow:hidden;margin:25px 0}
+    .code-top{display:flex;align-items:center;justify-content:space-between;padding:12px 17px;background:#1d2218;border-bottom:1px solid #333c29;font:10px var(--mono);color:var(--muted)}
+    .copy{border:0;color:var(--accent);font:11px var(--mono);background:transparent;padding:4px;min-width:54px}
+    pre{overflow-x:auto;padding:22px;margin:0;background:#151812;line-height:1.95;tab-size:2}
+    pre code{font-size:12px;color:var(--accent)}
+    .setup-list{padding-inline-start:22px;font-size:16px;margin:25px 0}
+    .setup-list li{margin:0 0 14px;padding-inline-start:5px}
+    .setup-list li::marker{color:var(--accent);font:12px var(--mono)}
+    .small{font-size:14px;line-height:1.8;color:var(--muted)}
+    .endnote{margin:40px 0 0;padding:30px 0;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:20px;align-items:center;font:12px var(--mono)}
+    .endnote a{text-decoration:none}
+    footer{max-width:1180px;padding:26px 32px 40px;margin:46px auto 0;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:20px;font:11px var(--mono);color:var(--muted)}
+    footer a{color:var(--muted);text-decoration:none}
+    .brand{font-family:var(--heading);letter-spacing:-.5px}
+    .nav-label,.nav-links{font-family:var(--heading);font-weight:400}
+    .brand img{display:block}
+    .nav-links .install-link{color:white;background:var(--accent);border-color:var(--accent);border-radius:4px}
+    .nav-links .install-link:hover{background:#285c51}
+    .avatar{background:#eae7fc;color:var(--secondary)}
+    .dot{color:#b0b0b0}
+    h1 span{color:var(--accent)}
+    .aside{background:#f2faf8;border-color:#c0e8e1}
+    kbd{background:#f7f7f7;border-color:#ccc}
+    p code{background:#f2faf8}
+    .code-block{border-color:#c0e8e1}
+    .code-top{background:#e2f4f1;border-color:#c0e8e1}
+    pre{background:#f2faf8}
+    .mechanism li::before{border-color:#c0e8e1}
+    .architecture,.demo{--ink:#e6e6e1;--text:#c1c3be;--muted:#a6aaa2;--accent:#94d5cb;--blue:#b0a5f5;--line:#3c423e;color:var(--text);background:#111;padding:28px 24px 24px;border-radius:4px}
+    .architecture img{background:#111}
+    .direction button[aria-pressed="true"],.steps li.active .step-button{border-color:#66bbaf;background:#152c27}
+    .reading-node.winner{border-color:var(--blue);--bevel-line:#b0a5f5;--bevel-top:#31264d;--bevel-side:#211a35;background:#211b32}
+    .reading-node.winner .reading-text{border-color:#7160df;background:#251e3b;color:#d0caf9}
+    .gate-node.passed{border-color:var(--accent);--bevel-line:#94d5cb;--bevel-top:#21473d;--bevel-side:#142d27;background:#183d36}
+    .demo[data-step="check"] .gate-node,.demo[data-step="fix"] .editor{border-color:#94d5cb;--bevel-line:#94d5cb;--bevel-top:#21473d;--bevel-side:#142d27;background:#183d36}
+    .demo[data-step="fix"] .gate-node{border-color:#4b4d4a;--bevel-line:#4b4d4a;--bevel-top:#242424;--bevel-side:#1a1a1a;background:#161616}
+    .demo[data-step="fix"] .editor .editor-bar{color:#bfe2da}
+    .demo[data-step="type"] .buffer-node{--bevel-line:#94d5cb}
+    .article-language{display:flex;gap:2px;border:1px solid var(--line);padding:3px;border-radius:5px;direction:ltr;flex-shrink:0}
+    .article-language button{border:0;background:transparent;color:var(--muted);border-radius:3px;padding:7px 9px;font:12px/1.5 var(--sans);min-height:34px}
+    .article-language button[aria-pressed="true"]{background:#e2f4f1;color:#285c51}
+    .article-language button:hover{color:#183d36}
+    .brand,pre,code,kbd,#buffer-keys,.demo-stage{direction:ltr;unicode-bidi:isolate}
+    pre{text-align:left}
+    code,kbd{display:inline-block}
+    html[lang="ar"] :is(h1,h2,h3,.eyebrow,.toc,.byline,.nav-label,.diagram-caption,.demo-label,.direction button,.step-button,.node-heading,.reading-title,.reading-meta,.reading-score,.gate-node,.editor-bar,.demo-result,.replay,.copy,.code-top,footer){font-family:var(--sans);letter-spacing:0}
+    html[lang="ar"] h1{font-size:clamp(36px,4vw,54px);font-weight:600;line-height:1.5}
+    html[lang="ar"] :is(h2,h3){line-height:1.6;font-weight:600}
+    html[lang="ar"] .pullquote{letter-spacing:0;line-height:1.8}
+    html[lang="ar"] .mechanism li::before{content:counter(mechanism,arabic-indic)}
+    html[lang="ar"] :is(.node-heading,.reading-title,.reading-score,.gate-node,.editor-bar){direction:rtl}
+    html[lang="ar"] :is(.reading-meta,.node-heading,.reading-title,.reading-score,.gate-node,.editor-bar){text-align:right}
+    html[lang="ar"] :is(.demo-label,.direction button,.step-button,.node-heading,.reading-title,.reading-meta,.reading-score,.gate-node,.editor-bar,.replay,.copy,.code-top,.byline,.toc){font-size:12px;line-height:1.6}
+    html[lang="ar"] .reading-title b,html[lang="ar"] .node-heading b{font-weight:600}
+    html[lang="ar"] .demo-result{min-height:64px;line-height:1.9}
+    @media(max-width:780px){.nav{gap:12px;padding-inline:20px}.nav-label{display:none}.nav-links{gap:12px}.nav-links>a:first-child{display:none}.article-language button{padding:6px 7px}.article-language{margin-inline-start:0}}
+    @media(max-width:480px){.nav{gap:8px;padding-inline:16px}.nav-links .install-link{white-space:nowrap}.brand{gap:5px}.article-language button{font-size:11px;padding:6px}.mechanism li{padding-inline-start:44px}html[lang="ar"] h1{font-size:36px;line-height:1.5}.os-note{white-space:normal}}
+    .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+    [hidden]{display:none!important}
+    @media(min-width:1400px){.page-grid{grid-template-columns:180px minmax(0,728px);column-gap:76px}}
+    @media(max-width:1050px){.page-grid{grid-template-columns:140px minmax(0,1fr);column-gap:34px}.architecture,.demo{margin-left:0;margin-right:0}h1{font-size:48px}.steps{gap:4px}.demo-bottom{align-items:flex-start;flex-wrap:wrap}.swipe-note{display:block}}
+    @media(max-width:780px){.nav{padding:0 24px}.nav-links{gap:18px}.page-grid{display:block;max-width:728px;padding:0 24px}.toc{display:none}article{padding-top:56px}h1{font-size:46px;letter-spacing:-2px}footer{padding-inline:24px}.site-header{height:72px}.architecture,.demo{padding:24px 18px}.demo-stage{min-width:0}.demo .swipe-note{display:none}.buffer-node,.editor,.gate-node{width:100%}.readings{grid-template-columns:1fr;gap:26px}.diagram-branches{height:34px;width:1px;margin:auto;border-left:1px dashed #62635c}.diagram-branches path,.diagram-branches circle{display:none}.gate-node{flex-wrap:wrap}.buffer-keys{gap:3px}.buffer-keys span{font-size:11px}.node-heading{flex-wrap:wrap}.reading-text{font-size:20px}.architecture .swipe-note{margin:0 0 14px}}
+    @media(max-width:480px){body{font-size:16px}.nav{gap:15px;padding:0 20px}.nav-label{padding-left:15px;font-size:9px}.nav-links>a:first-child{display:none}.nav-links .install-link{padding:8px 10px;font-size:11px}.brand{font-size:21px;gap:7px}.brand img{width:30px;height:28px}.page-grid{padding:0 20px}article{padding-top:42px}h1{font-size:39px;letter-spacing:-1.7px}.dek{font-size:17px}.byline{flex-wrap:wrap;font-size:10px;gap:8px}.byline .avatar{width:26px;height:26px}section{padding-top:40px}h2{font-size:27px}.opening{font-size:19px}.pullquote{font-size:21px}.architecture,.demo{margin-inline:-8px;padding:22px 14px}.demo-top{align-items:flex-start;flex-direction:column;gap:14px}.demo-bottom{align-items:flex-start;flex-direction:column;gap:15px}.step-button{padding:9px 7px}.replay{align-self:flex-end}.diagram-caption{flex-direction:column;gap:4px}.mechanism li{padding-inline-start:44px}.control-row{grid-template-columns:110px 1fr;gap:12px;font-size:14px}.install-heading{align-items:flex-start;flex-direction:column}.aside{padding:18px}pre{padding:17px}pre code{font-size:11px}.endnote{font-size:11px;flex-wrap:wrap}footer{flex-direction:column;font-size:10px;gap:10px}}
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{transition:none!important;animation:none!important}}
+    @media print{html{color-scheme:light}body{background:white;color:#222;font-size:11pt}.site-header,.toc,.demo-top,.demo-bottom,.copy,footer,.endnote,.swipe-note{display:none}.page-grid{display:block;padding:0;max-width:none}article{padding:0}h1{font-size:32pt}.architecture,.demo,.aside,.code-block{break-inside:avoid}section{padding-top:25px}.architecture,.demo{margin-inline:0;print-color-adjust:exact;-webkit-print-color-adjust:exact}.diagram-viewport{overflow:visible}.architecture img,.demo-stage{min-width:0}.byline,.caption,.small{color:#555}}
+
+    .source-note{font-size:12px;color:var(--muted);margin-top:24px;overflow-wrap:anywhere;line-height:1.9}
+    .source-note a{color:var(--accent)}
+    .formula{padding:20px 16px;background:#f2faf8;border-inline-start:2px solid var(--primary);margin:24px 0;text-align:center;overflow-x:auto}
+    .formula code{font-size:13px;white-space:nowrap}
+    .table-scroll{overflow-x:auto;margin:25px 0;scrollbar-width:thin}
+    table{width:100%;border-collapse:collapse;font-size:14px;line-height:1.6;text-align:start}
+    caption{text-align:start;font-size:12px;color:var(--muted);padding-bottom:16px}
+    th,td{padding:15px 12px;border-bottom:1px solid var(--line);text-align:start}
+    th{font-weight:550;color:var(--ink)}
+    td{font-family:var(--mono);direction:ltr;unicode-bidi:isolate}
+    .table-scroll td,.table-scroll thead th:not(:first-child){text-align:center}
+    thead th{font-size:12px;color:var(--muted)}
+    .score-figure,.safety-figure{--ink:#e6e6e1;--text:#c1c3be;--muted:#a6aaa2;--line:#3c423e;background:#111;color:var(--text);padding:30px 26px;margin:34px 0;border-radius:4px}
+    .score-figure .table-scroll{margin-top:0}.score-figure table{min-width:430px}
+    .score-figure th bdi{font-weight:400}.score-winner{background:#211b32}.score-winner td{color:#d0caf9}
+    .score-figure figcaption,.safety-figure figcaption{font-size:12px;line-height:1.8;color:var(--muted);margin-top:20px}
+    .verify-root{max-width:330px;margin:8px auto 0;padding:18px;text-align:center}.verify-root span{display:block;font-size:12px;color:var(--muted)}
+    .verify-stem{height:42px;border-inline-start:1px dashed #94d5cb;width:1px;margin:auto}
+    .verify-branches{display:grid;grid-template-columns:1fr 1fr;gap:26px;border-top:1px dashed #747970;padding-top:25px}
+    .verify-branches>div{padding:20px 17px}.verify-branches h3{font-size:18px;margin-bottom:12px}.verify-branches p{font-size:13px;line-height:1.8;margin:0}.verify-branches strong{display:inline-block;margin-top:12px}
+    .verify-pass{background:#183d36;--bevel-line:#94d5cb;--bevel-top:#21473d;--bevel-side:#142d27;border-color:#94d5cb}
+    .toc{padding-top:94px;font-size:11px}.toc a{padding-block:7px}
+    @media(max-width:480px){.score-figure,.safety-figure{padding:24px 16px;margin-inline:-8px}.verify-branches{grid-template-columns:1fr;gap:24px}.formula{text-align:start}.formula code{font-size:11px}th,td{padding:12px 9px}table{font-size:12px}.toc{display:none}}
+
+    .dictionary-figure{--ink:#e6e6e1;--text:#c1c3be;--muted:#a6aaa2;--accent:#94d5cb;background:#111;color:var(--text);padding:30px 26px;margin:34px 0;border-radius:4px}
+    .dictionary-flow{display:grid;grid-template-columns:minmax(0,1fr) 32px minmax(0,1fr);align-items:center;margin:32px 10px 28px 0}
+    .dictionary-flow .bevel{padding:22px 18px;min-height:198px}.dictionary-flow h3{font-size:18px;margin-bottom:22px}.dictionary-flow p{font-size:12px;line-height:1.8;margin:16px 0 0}
+    .dictionary-word{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}.dictionary-word bdi{font:19px var(--mono);color:var(--ink)}.dictionary-word span{font-size:11px;color:var(--muted)}
+    .dictionary-wire{border-top:1px dashed #94d5cb;width:100%}
+    #dictionary-progress{display:grid;grid-template-columns:repeat(10,1fr);gap:4px;margin-top:22px}#dictionary-progress span{height:16px;border:1px solid #4a5450;background:#1c2421}#dictionary-progress span.filled{background:#94d5cb;border-color:#94d5cb}
+    .dictionary-actions,.dictionary-stages{display:flex;flex-wrap:wrap;gap:8px}.dictionary-actions{justify-content:space-between;align-items:center}
+    .dictionary-actions button{font:11px/1.6 var(--sans);padding:8px 10px;border:1px solid #4b4d4a;background:#161616;color:var(--text);min-height:38px}
+    .dictionary-actions button[aria-pressed="true"]{border-color:#94d5cb;color:#94d5cb;background:#183d36}.dictionary-actions button:disabled{cursor:default;opacity:.45}
+    .dictionary-figure[data-learned="true"] .dictionary-entry{background:#183d36;--bevel-line:#94d5cb;--bevel-top:#21473d;--bevel-side:#142d27;border-color:#94d5cb}.dictionary-figure[data-learned="true"] #dictionary-state{color:#94d5cb}
+    #dictionary-result{font-size:13px;line-height:1.8;margin:22px 0 12px;min-height:70px}.dictionary-figure figcaption{font-size:11px;line-height:1.8;color:var(--muted)}
+    @media(max-width:600px){.dictionary-flow{grid-template-columns:1fr}.dictionary-wire{width:1px;height:30px;border-top:0;border-inline-start:1px dashed #94d5cb;margin:auto}.dictionary-flow .bevel{min-height:0}.dictionary-figure{padding:24px 18px;margin-inline:-8px}.dictionary-actions{gap:15px}#dictionary-result{min-height:0}}
+
+    .animation-toggle{display:block;margin:0 0 24px auto;border:1px solid #63766f;background:#15221e;color:#bfe2da;font:12px/1.6 var(--sans);padding:8px 12px;min-height:38px;cursor:pointer}
+    html[dir="rtl"] .animation-toggle{margin-left:0;margin-right:auto}
+    .score-controls{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}.score-controls button{border:1px solid #4b4d4a;background:#161616;color:#c1c3be;padding:8px 10px;font:12px/1.6 var(--sans);min-height:38px}.score-controls button[aria-pressed="true"]{background:#183d36;color:#94d5cb;border-color:#94d5cb}
+    .score-figure .score-active{background:#214039;color:#c3f0e6;box-shadow:inset 0 -2px #94d5cb}
+    #score-explanation{font-size:13px;line-height:1.9;margin:20px 0 0;min-height:78px}
+    .is-running .dictionary-wire{border-color:#b0a5f5}.is-running[data-learned="true"] .dictionary-entry{animation:dictionary-promoted .7s ease-out}
+    .demo[data-step="type"] #buffer-keys span.current-key{background:#94d5cb;border-color:#b7fff0;color:#111;transform:translateY(-2px)}
+    .demo #buffer-keys span.captured-key{border-color:#60756d}
+    .reading-text{min-height:62px}
+    .demo[data-step="type"] .demo-text span{border-inline-end:1px solid #94d5cb;padding-inline-end:4px;min-height:1.5em}
+    @keyframes dictionary-promoted{from{box-shadow:0 0 0 3px #94d5cb}to{box-shadow:0 0 0 0 transparent}}
+    @media(prefers-reduced-motion:reduce){.is-running .dictionary-entry,.is-running[data-step="type"] #buffer-keys span{animation:none}}
+    @media(max-width:480px){.score-figure table{min-width:0;table-layout:fixed}.score-figure th,.score-figure td{padding:12px 5px;font-size:11px;overflow-wrap:anywhere}.score-figure th:first-child{width:30%}.score-figure thead th{font-size:10px}}
+
+    .architecture-canvas{position:relative;min-width:640px}.architecture-flow{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible;direction:ltr}
+    .architecture-node{opacity:0;filter:drop-shadow(0 0 5px #94d5cb)}.architecture-node.active{opacity:1;fill:#94d5cb18}.architecture-packet{filter:drop-shadow(0 0 5px #94d5cb)}
+    .architecture-playback,.architecture-steps{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px}.architecture-playback{justify-content:flex-end}.architecture-playback button,.architecture-steps button{border:1px solid #63766f;background:#15221e;color:#bfe2da;font:12px/1.6 var(--sans);padding:8px 12px;min-height:38px}.architecture-steps button[aria-pressed="true"]{background:#21473d;border-color:#b7fff0;color:#edfffa}
+    .architecture-readout{display:flex;flex-wrap:wrap;align-items:center;gap:12px 22px;padding:18px 20px;margin:0 0 22px;border:1px solid #454f49;background:#181b19}.architecture-readout span{font-size:11px;color:#a6aaa2}.architecture-readout bdi{font:21px/1.8 var(--mono);color:#eee}.architecture-readout span:last-child{margin-inline-start:auto}.architecture-readout.changed{border-color:#94d5cb;background:#183d36}.architecture-readout.changed bdi{font-family:var(--sans);color:#b7fff0}
+    .architecture-explanation{margin:20px 0 14px;min-height:92px}.architecture-explanation strong{display:block;color:#b7fff0;font-size:15px;margin-bottom:7px}.architecture-explanation p{font-size:13px;line-height:1.8;color:#c1c3be;margin:0}
+    @media(max-width:480px){.architecture-readout{align-items:flex-start;flex-direction:column;gap:5px;padding:14px}.architecture-readout span:last-child{margin-inline-start:0}.architecture-playback{justify-content:flex-start}.architecture-explanation{min-height:135px}}
+    @media print{.architecture-playback,.architecture-steps{display:none}}
+  </style>
+</head>
+<body id="top">
+  <a class="skip" href="#article" data-i18n="skip">Skip to article</a>
+  <header class="site-header">
+    <nav class="nav" aria-label="Main navigation" data-i18n-aria-label="nav">
+      <a class="brand" href="#top" aria-label="Hatif Engineering home" data-i18n-aria-label="home"><img src="assets/hatif-logo-mark.svg" width="37" height="34" alt="">Hatif</a>
+      <span class="nav-label" data-i18n="engineering">ENGINEERING</span>
+      <div class="nav-links"><a href="https://github.com/alialhawas/Harf">GitHub ↗</a><a class="install-link" href="#install" data-i18n="getHarf">Get Harf <span aria-hidden="true">↗</span></a></div>
+      <div class="article-language" role="group" aria-label="Article language / لغة المقال" hidden><button type="button" data-locale="en" lang="en" aria-pressed="true">English</button><button type="button" data-locale="ar" lang="ar" aria-pressed="false">العربية</button></div>
+    </nav>
+  </header>
+  <main class="page-grid">
+    <aside class="toc" aria-label="On this page" data-i18n-aria-label="contents">
+      <p class="eyebrow" data-i18n="contents">In this story</p>
+      <a href="#problem" aria-current="location" data-i18n="navProblem">Between clients and code</a>
+      <a href="#meet-harf" data-i18n="navMeet">Meet Harf</a>
+      <a href="#how-it-works" data-i18n="navHow">From keys to words</a>
+<a href="#language-scores" data-i18n="navScores">The language scores</a>
+<a href="#finding-region" data-i18n="navRegion">Finding the boundary</a>
+<a href="#decision-rules" data-i18n="navDecision">Deciding when to act</a>
+<a href="#safe-replacement" data-i18n="navSafe">Replacing safely</a>
+<a href="#learning-and-testing" data-i18n="navLearn">Your smart dictionary</a>
+      <a href="#install" data-i18n="navInstall">Try it on your Mac</a>
+      <p class="toc-note" data-i18n="tocNote">العربية ↔ English<br>Same keys. Two languages.</p>
+    </aside>
+    <article id="article">
+      <header class="article-header">
+        <div class="eyebrow" data-i18n="category">Hatif Engineering · Building Harf</div>
+        <h1 data-i18n="headline">From client conversations to code.<br><span>Why we built Harf.</span></h1>
+        <p class="dek" data-i18n="summary">Day-to-day emails, helping clients, writing replies, then back to coding: our work moves between Arabic and English. Harf handles the keyboard-layout mistakes that come with that routine.</p>
+        <div class="byline"><span class="avatar" aria-hidden="true">AA</span><strong data-i18n="author">Ali Alhawas</strong><span class="dot" aria-hidden="true">/</span><time datetime="2026-09-19" data-i18n="date">September 19, 2026</time><span class="dot" aria-hidden="true">/</span><span data-i18n="readTime">15 min read</span></div>
+      </header>
+
+      <section id="problem" aria-labelledby="problem-title">
+        <h2 id="problem-title" class="sr-only" data-i18n="navProblem">Between clients and code</h2>
+        <p class="opening" data-i18n="intro">Client conversations and code share the same working day.</p>
+        <p data-i18n="workflow">Between day-to-day emails, helping clients, and writing replies, we work in Arabic. Then we return to the code, comments, and technical discussions in English. That back-and-forth happens throughout the day.</p>
+        <p data-i18n="keyboardStays">The task has changed, but the active keyboard layout may still belong to the previous conversation.</p>
+        <p data-i18n="wrongText">So we start typing. A few words later, we look up and see <code dir="ltr">hgsghl ugd;l</code> where we meant <span lang="ar" dir="rtl">السلام عليكم</span>.</p>
+        <p data-i18n="routine">Fixing it means deleting the text, changing the layout, and typing the same words again. The cost is small each time, but it interrupts the work we were trying to finish.</p>
+        <blockquote class="pullquote" data-i18n="question">The keys already contain the words we meant.<br>Could we recover them without typing again?</blockquote>
+        <p data-i18n="origin">We built Harf around that idea: recover the intended text from the keys already pressed.</p>
+        <figure class="architecture" id="architecture-diagram">
+          <p class="swipe-note" data-i18n="swipe">Swipe the diagram to explore →</p>
+          <div class="diagram-viewport" tabindex="0" role="region" aria-label="Harf system architecture; scroll horizontally on small screens" data-i18n-aria-label="architecture">
+            <img src="assets/harf-architecture.svg" width="1000" height="650" alt="An isometric view of Harf: application, keystroke capture, buffer, comparison of English and Arabic readings, safety check, and replacement in the original app." data-i18n-alt="architectureAlt">
+          </div>
+          <figcaption class="diagram-caption"><strong data-i18n="architectureCaption">01 / The path through Harf</strong><span data-i18n="localCaption">Everything runs on your Mac.</span></figcaption>
+        </figure>
+      </section>
+
+      <section id="meet-harf" aria-labelledby="meet-title">
+        <h2 id="meet-title" data-i18n="meetTitle">Recover the words you meant.</h2>
+        <p data-i18n="meetIntro"><strong>Harf</strong> (<span lang="ar" dir="rtl">حرف</span>, Arabic for “letter”) is a macOS menu-bar utility that detects text typed with the wrong Arabic or English keyboard layout.</p>
+        <p data-i18n="meetBehavior">After a pause of about a second, Harf compares what you typed with what the same keys produce in the other layout. When the evidence and safety checks allow it, it replaces the text and changes the input language for what comes next.</p>
+
+        <figure class="demo" id="correction-demo" data-step="ready" aria-label="Interactive system diagram comparing English and Arabic keyboard readings" data-i18n-aria-label="demo">
+          <div class="demo-top"><span class="demo-label" data-i18n="demoLabel">02 / Follow the keystrokes</span><div class="direction" role="group" aria-label="Intended language" data-i18n-aria-label="intended"><button type="button" data-language="ar" aria-pressed="true" data-i18n="arabic">Arabic</button><button type="button" data-language="en" aria-pressed="false" data-i18n="english">English</button></div></div>
+          <div class="diagram-viewport" tabindex="0" role="region" aria-label="Keystroke comparison diagram; scroll horizontally on small screens" data-i18n-aria-label="diagram">
+            <div class="demo-stage">
+              <div class="buffer-node bevel"><div class="node-heading"><b data-i18n="bufferTitle">KEYSTROKE BUFFER</b> <span data-i18n="physicalKeys">physical keys</span></div><div class="buffer-keys" id="buffer-keys" aria-label="Keys pressed" data-i18n-aria-label="keys"><span>H</span><span>G</span><span>S</span><span>G</span><span>H</span><span>L</span><span>␣</span><span>U</span><span>G</span><span>D</span><span>;</span><span>L</span></div></div>
+              <svg class="diagram-branches to-layouts" viewBox="0 0 700 66" preserveAspectRatio="none" aria-hidden="true"><path d="M350 0V25H171V64M350 25H527V64"/><circle cx="350" cy="25" r="3"/></svg>
+              <div class="readings">
+                <div class="reading-node bevel" data-reading="en"><div class="reading-title"><b data-i18n="englishLayout">ENGLISH LAYOUT</b> <span>EN</span></div><p class="reading-meta" data-i18n="rendered">rendered text</p><bdi class="reading-text" id="english-reading" lang="en" dir="ltr">hgsghl ugd;l</bdi><div class="reading-score"><span data-i18n="evidence">language evidence</span><b id="english-evidence">not compared</b></div></div>
+                <div class="reading-node bevel" data-reading="ar"><div class="reading-title"><b data-i18n="arabicLayout">ARABIC LAYOUT</b> <span>AR</span></div><p class="reading-meta" data-i18n="rendered">rendered text</p><bdi class="reading-text" id="arabic-reading" lang="ar" dir="rtl">السلام عليكم</bdi><div class="reading-score"><span data-i18n="evidence">language evidence</span><b id="arabic-evidence">not compared</b></div></div>
+              </div>
+              <svg class="diagram-branches to-gate" viewBox="0 0 700 66" preserveAspectRatio="none" aria-hidden="true"><path d="M171 0V26H350V65M527 0V26H350"/><circle cx="350" cy="26" r="3"/></svg>
+              <div class="gate-node bevel" id="safety-node"><b data-i18n="safetyTitle">SAFETY CHECK</b> <span id="gate-status">waiting</span></div>
+              <div class="output-wire" aria-hidden="true"></div>
+              <div class="editor bevel"><div class="editor-bar"><span data-i18n="activeApp">ACTIVE APPLICATION</span><span class="layout-pill" id="layout-label">Keyboard: English</span></div><div class="demo-text" id="demo-text"><span dir="ltr" lang="en">hgsghl ugd;l</span></div></div>
+            </div>
+          </div>
+          <p class="swipe-note" data-i18n="swipe">Swipe the diagram to explore →</p>
+          <div class="demo-bottom"><ol class="steps" aria-label="Inspect a correction stage" data-i18n-aria-label="stages"><li data-stage="type"><button class="step-button" type="button" data-inspect="type" aria-pressed="false" data-i18n="stepCapture">1. Capture</button></li><li data-stage="compare"><button class="step-button" type="button" data-inspect="compare" aria-pressed="false" data-i18n="stepCompare">2. Compare</button></li><li data-stage="check"><button class="step-button" type="button" data-inspect="check" aria-pressed="false" data-i18n="stepCheck">3. Check</button></li><li data-stage="fix"><button class="step-button" type="button" data-inspect="fix" aria-pressed="false" data-i18n="stepCorrect">4. Correct</button></li></ol><button type="button" class="replay" id="replay">Follow a keystroke ○</button></div>
+          <figcaption class="demo-result" id="demo-result" role="status" aria-live="polite">You meant to write Arabic. The keyboard was in English.</figcaption>
+        </figure>
+        <p class="caption" data-i18n="demoCaption">Follow each key through both layouts, then comparison and correction. Choose a language or pause at any step. This illustration repeats while visible; actual results depend on the text, settings, and app.</p>
+        <noscript><p class="aside">Example: <code>hgsghl ugd;l</code> becomes <span lang="ar" dir="rtl">السلام عليكم</span>. In the other direction, <span lang="ar" dir="rtl">اثممخ صخقمي</span> becomes “hello world”. Enable JavaScript to replay the illustration.</p></noscript>
+        <p data-i18n="reverse">It also works in the other direction: English typed while the Arabic layout is active can be restored to English. Harf fixes the keyboard layout; spelling mistakes in the intended words may still be there.</p>
+      </section>
+
+      <section id="how-it-works" aria-labelledby="how-title">
+        <h2 id="how-title" data-i18n="howTitle">One sequence of keys, two possible readings.</h2>
+        <p data-i18n="howIntro">Harf starts with the keys, because a layout mistake changes their interpretation. Its pipeline keeps the recent input, compares the two readings, and checks whether a replacement is justified.</p>
+        <ol class="mechanism">
+          <li><h3 data-i18n="captureTitle">Keep the keys, briefly.</h3><p data-i18n="captureBody">With your permission, Harf captures the keys you type. It clears the buffer when you change apps, click elsewhere, press Enter, or navigate away, so old typing does not follow you into the next conversation.</p></li>
+          <li><h3 data-i18n="pauseTitle">Wait for a pause.</h3><p data-i18n="pauseBody">After about a second without typing, it looks for a trailing stretch of text that might be in the wrong layout. It renders the keys under your enabled English and Arabic layouts using macOS’s own keyboard data.</p></li>
+          <li><h3 data-i18n="compareTitle">Compare both readings.</h3><p data-i18n="compareBody">Local dictionaries and letter-pattern scores help decide which reading looks like language. Harf examines words to find the candidate stretch, then considers that stretch together. It does not assume an entire bilingual message should be converted.</p></li>
+          <li><h3 data-i18n="correctTitle">Correct when the evidence is clear.</h3><p data-i18n="correctBody">A confident result can replace the wrong-layout text and switch the input source, subject to safety checks. A less certain result can appear as a suggestion. When there is not enough evidence, Harf leaves the text alone.</p></li>
+        </ol>
+        <div class="aside"><strong data-i18n="privacyTitle">The comparison happens on your Mac.</strong><p data-i18n="privacyBody">Harf does not send your typing to a server or call a cloud language model. If vocabulary learning is enabled, learned words are saved locally, where you can inspect or remove them.</p></div>
+        <p data-i18n="global">You do not need a plugin for each app. Harf runs at the macOS level, so it can work across native apps, browser text fields, and terminals. Apps expose text differently, though, so correction behavior can vary.</p>
+      </section>
+
+<p  data-i18n="revision">The walkthrough below follows <a href="https://github.com/alialhawas/Harf/tree/be9943408a2e6b697d0f3aada9a17a783ee42c4a">Harf’s published source at <code>be99434</code></a>. The example scores were reproduced by building that revision. This matters: the detector’s verdict and permission to edit are separate decisions.</p><section id="capture-details" aria-labelledby="capture-details-title"><h2 id="capture-details-title" data-i18n="captureDetailsTitle">Keep enough context to reconstruct the text.</h2><p  data-i18n="eventDetails">A macOS <code>CGEventTap</code> observes key-down events on a dedicated run-loop thread. Each captured event includes the physical keycode, modifier flags, keyboard type, produced text, and timestamp. The event is handed to a serial typing queue; language scoring stays out of the tap callback.</p><p  data-i18n="bufferDetails">The default buffer holds <strong>200 keys</strong>. Backspace removes the last buffered key. Enter, Tab, navigation, a click, or an app/layout change invalidate the run. There are three different clocks: a <strong>one-second pause</strong> triggers evaluation; a run the first evaluation left alone is examined once more after <strong>three seconds</strong> of stillness; <strong>ten seconds of inactivity</strong> makes the old run stale. Both the buffer size and stale interval are configurable.</p><p  data-i18n="renderDetails">Harf then replays candidate keys through macOS’s <code>UCKeyTranslate</code> using the enabled layouts’ keyboard tables. The alternate is tried as typed, with Shift removed, and with both Shift and Caps Lock removed. Otherwise, someone typing Arabic with Caps Lock on could produce mostly diacritics in the alternate reading. The renderer also carries dead-key composition state between keys.</p><p  data-i18n="bufferClaim">The buffer describes what Harf observed, which can differ from what the editor now displays. Autocomplete can change a word without matching keystrokes. That is why the design needs a check of the text at the caret as well as a language score.</p><p class="source-note"  data-i18n="captureSources">Read the implementation: <a href="https://github.com/alialhawas/Harf/blob/be9943408a2e6b697d0f3aada9a17a783ee42c4a/Sources/DodomaAppKit/EventTapController.swift">EventTapController.swift</a> · <a href="https://github.com/alialhawas/Harf/blob/be9943408a2e6b697d0f3aada9a17a783ee42c4a/Sources/DodomaCore/TypingSession.swift">TypingSession.swift</a> · <a href="https://github.com/alialhawas/Harf/blob/be9943408a2e6b697d0f3aada9a17a783ee42c4a/Sources/DodomaCore/BufferResetPolicy.swift">BufferResetPolicy.swift</a> · <a href="https://github.com/alialhawas/Harf/blob/be9943408a2e6b697d0f3aada9a17a783ee42c4a/Sources/DodomaCore/LayoutRenderer.swift">LayoutRenderer.swift</a>.</p></section><section id="language-scores" aria-labelledby="language-scores-title"><h2 id="language-scores-title" data-i18n="scoreTitle">Two readings, two kinds of evidence.</h2><p  data-i18n="bigramDetail">The first signal is a <strong>letter bigram</strong>: how plausible each neighboring pair of letters is in that language. Harf includes word-start and word-end markers, averages the pairs’ log probabilities, and calibrates the result to a 0–1 scale. This gives unfamiliar words some credit when their spelling still resembles the language.</p><p  data-i18n="dictDetail">The second signal is <strong>dictionary coverage</strong>. It measures how much of the text is made of known words, weighted by token length: one-letter words are ignored, two-letter words weigh 0.5, and longer words weigh their length. Lookup includes normalized forms and simple English suffixes or Arabic affixes. A local user lexicon supplements the bundled lists. Normalization changes the scoring input, not the text inserted into the app.</p><div class="formula" dir="ltr"><code>score = 0.55 × bigram + 0.45 × dictionary</code></div><p  data-i18n="scoreMeaning">A name or technical term can be missing from a dictionary while still having familiar letter patterns. Giving those patterns slightly more weight helps the two signals complement each other. The result is a <strong>score for comparing readings</strong>; a score of 0.90 does not mean a correction has a 90% chance of being right.</p><figure class="score-figure"><div class="table-scroll" tabindex="0"><table  data-i18n="scoreTable"><caption>03 / Measured trace: <bdi>hgsghl ugd;l</bdi></caption><thead><tr><th scope="col">Reading</th><th scope="col">Bigram</th><th scope="col">Dictionary</th><th scope="col">Combined</th></tr></thead><tbody><tr><th scope="row">English<br><bdi>hgsghl ugd;l</bdi></th><td>0.244</td><td>0.000</td><td>0.134</td></tr><tr class="score-winner"><th scope="row">Arabic<br><bdi lang="ar">السلام عليكم</bdi></th><td>0.823</td><td>1.000</td><td>0.903</td></tr></tbody></table></div><figcaption  data-i18n="scoreCaption">Built from the linked revision on this Mac using ABC and Arabic layouts, balanced aggressiveness, and the CLI’s local lexicon. Values are rounded independently; the reported gap is 0.768.</figcaption></figure><p  data-i18n="traceResult">In this example, the selected text has 10 letters and two words. The space completes the first word. With no text guard blocking it, the detector proposes deleting 12 characters, inserting <bdi lang="ar">السلام عليكم</bdi>, and selecting Arabic input. The application has not changed yet.</p><p class="source-note"  data-i18n="scoreSources">Read the implementation: <a href="https://github.com/alialhawas/Harf/blob/be9943408a2e6b697d0f3aada9a17a783ee42c4a/Sources/DodomaCore/LanguageModel.swift">LanguageModel.swift</a> · <a href="https://github.com/alialhawas/Harf/blob/be9943408a2e6b697d0f3aada9a17a783ee42c4a/Sources/DodomaCore/Resources/LICENSES.md">LICENSES.md</a> · <a href="https://github.com/alialhawas/Harf/blob/be9943408a2e6b697d0f3aada9a17a783ee42c4a/Sources/DodomaCore/FixDecision.swift">FixDecision.swift</a>.</p></section><section id="finding-region" aria-labelledby="finding-region-title"><h2 id="finding-region-title" data-i18n="regionTitle">Where does the mistake begin?</h2><p  data-i18n="regionProblem">A client reply can contain Arabic prose, an English product name, and a link. Harf needs to find where the wrong-layout text begins within that mixture. <code>Segmenter</code> starts with a suspicious stretch at the end and checks the words to locate its boundary. The candidate ends at the caret, including any trailing separator.</p><p  data-i18n="collisionExample">But a valid dictionary word can occur by accident. One regression test types <code>what is pr dojs</code> through Arabic and gets <bdi lang="ar">صاشف هس حق يختس</bdi>. The middle token, <bdi lang="ar">حق</bdi>, is real Arabic. A strict “stop at a known word” rule would leave much of the mistaken sentence untouched.</p><p  data-i18n="regionExtension">The implementation therefore compares longer suffixes too. An extension must improve the alternate-minus-current score gap by more than <strong>0.05</strong>. Another pass counts decisive token votes: a token needs a <strong>0.25</strong> gap to vote, and the alternate needs at least two votes and <strong>70%</strong> of decisive votes. A boundary check resists crossing a plausible current-language word whose alternate letter pattern is weak.</p><p  data-i18n="regionNotVerdict">These passes select the text to evaluate. The score thresholds, text guards, app policy, and caret checks still decide whether it can be changed. Recovering the layout also preserves an original typo such as <code>dojs</code>: that is what the pressed keys spell in English.</p><p class="source-note"  data-i18n="regionSources">Read the implementation: <a href="https://github.com/alialhawas/Harf/blob/be9943408a2e6b697d0f3aada9a17a783ee42c4a/Sources/DodomaCore/Segmenter.swift">Segmenter.swift</a> · <a href="https://github.com/alialhawas/Harf/blob/be9943408a2e6b697d0f3aada9a17a783ee42c4a/Tests/DodomaCoreTests/SegmenterTests.swift">SegmenterTests.swift</a>.</p></section><section id="decision-rules" aria-labelledby="decision-rules-title"><h2 id="decision-rules-title" data-i18n="decisionTitle">When is the evidence enough?</h2><p  data-i18n="ordinaryGates">A higher score in the other language is only the start. The ordinary automatic path requires at least six letters, one completed word, no text guard blocking the edit, and an app policy that allows automatic correction. In the table, “current” is the active layout, “alternate” is the other layout, and “gap” is the alternate score minus the current score:</p><div class="table-scroll"><table  data-i18n="thresholdTable"><caption>Standard automatic score gates</caption><thead><tr><th scope="col">Preset</th><th scope="col">Alternate ≥</th><th scope="col">Current ≤</th><th scope="col">Gap ≥</th></tr></thead><tbody><tr><th scope="row">Conservative</th><td>0.70</td><td>0.20</td><td>0.48</td></tr><tr><th scope="row">Balanced</th><td>0.62</td><td>0.28</td><td>0.40</td></tr><tr><th scope="row">Eager</th><td>0.56</td><td>0.34</td><td>0.34</td></tr></tbody></table></div><p  data-i18n="exceptions">There are explicit shortcuts. On that same guarded path, an alternate score of at least 0.78 with a gap of 0.50 can win despite the current-score ceiling; dictionary coverage of at least 0.80 versus at most 0.15 can also win across two or more tokens. Separately, fresh app settings enable a 0.80 confidence threshold: with at least three letters and a 0.45 gap, it may bypass the usual length/completion rules and the short-word veto. Other text vetoes still apply. On the second look, three seconds after the last key, an unfinished final word counts as finished: nobody stops that long between two letters of one word. That allowance reaches this threshold alone; the ordinary automatic path still requires a word a whitespace key actually completed.</p><p  data-i18n="guardExamples">The guards recognize patterns such as <code>user@example.com</code>, <code>src/main.swift</code>, <code>userName</code>, <code>v2</code>, and mixed Arabic/Latin letters within a token. One veto normally prevents auto-apply; two prevent even a suggestion. Under balanced settings, a suggestion still needs at least four letters, an alternate score of 0.45, and a gap of 0.18. These are deliberately different outcomes: apply, suggest, or leave alone.</p><p class="source-note"  data-i18n="decisionSources">Read the implementation: <a href="https://github.com/alialhawas/Harf/blob/be9943408a2e6b697d0f3aada9a17a783ee42c4a/Sources/DodomaCore/FixDecision.swift">FixDecision.swift</a> · <a href="https://github.com/alialhawas/Harf/blob/be9943408a2e6b697d0f3aada9a17a783ee42c4a/Sources/DodomaCore/TextGuards.swift">TextGuards.swift</a> · <a href="https://github.com/alialhawas/Harf/blob/be9943408a2e6b697d0f3aada9a17a783ee42c4a/Sources/DodomaCore/Settings.swift">Settings.swift</a>.</p></section><section id="safe-replacement" aria-labelledby="safe-replacement-title"><h2 id="safe-replacement-title" data-i18n="safeTitle">Check the text before replacing it.</h2><p  data-i18n="safeIntro">Before language evaluation, Harf checks whether it is paused, what the active app allows, and whether macOS Secure Input is on. It also asks Accessibility whether the focused field is secure. A confirmed secure field stops the result from proceeding. If the field type is unknown, that check alone does not stop the pipeline, so the separate Secure Input check remains important.</p><p  data-i18n="verifyDetail">For an automatic edit, Harf asks the Accessibility API for text immediately before the caret and compares UTF-16 units with the exact text it intends to remove. A full match passes. The implementation also accepts a shorter matching suffix of at least four UTF-16 units, for apps that expose only part of the line. That is a deliberate compromise: it confirms the visible tail, not every character scheduled for deletion. Users can also explicitly configure apps to skip this verification.</p><figure class="safety-figure"><div class="verify-root bevel"><strong  data-i18n="verifyRoot">Proposed automatic edit</strong><span><span  data-i18n="verifyRootSub">Read the caret text</span></span></div><div class="verify-stem" aria-hidden="true"></div><div class="verify-branches"><div class="bevel verify-pass"><h3  data-i18n="verifyPass">Matching text</h3><p  data-i18n="verifyPassBody">Full match, or a matching suffix ≥ 4 UTF-16 units.<br><strong>Continue to apply checks.</strong></p></div><div class="bevel"><h3  data-i18n="verifySuggest">Cannot verify</h3><p  data-i18n="verifySuggestBody">Mismatch, selection, timeout, or no exposed text.<br><strong>Downgrade to a suggestion.</strong></p></div></div><figcaption  data-i18n="verifyCaption">04 / Automatic caret verification, with verification enabled and the secure-field gate passed. An explicit acceptance uses a different rule for structurally unreadable fields.</figcaption></figure><p  data-i18n="explicitVerify">When you accept a suggestion, Harf uses the best verification the app provides. It can continue if the app has no interface for reading the text at all. It still refuses a mismatch, an active selection, or a read that should be available but fails. An unsupported text interface and a failed read lead to different decisions.</p><p  data-i18n="raceDetail">Those reads are asynchronous. The pipeline snapshots an <strong>input serial</strong>, a counter that advances when input arrives. If it changes while verification is in flight, the pending edit is discarded. The injector checks again after waiting for held modifiers to be released: an Option-modified backspace would delete a word, not one character.</p><p  data-i18n="injectDetail">The actual edit is a sequence of marked backspace events followed by Unicode insertion, then input-source selection. Delete counts use Swift character clusters; insertion is chunked in UTF-16. The mark prevents Harf from treating its own replacement as fresh typing. The injector checks the frontmost app during deletion and insertion so an app switch can stop the sequence.</p><p  data-i18n="atomicLimit">This is not an atomic editor transaction. If application focus changes halfway through, some events may already have landed; the engine reports partial progress and does not attempt a blind rollback. If the user types during a rewrite, those keys still reach the app but are excluded from Harf’s buffer. The pipeline then clears that unreliable buffer and withholds an unsafe undo. These checks reduce risk; they do not make every app behave like a native text editor.</p><p class="source-note"  data-i18n="safetySources">Read the implementation: <a href="https://github.com/alialhawas/Harf/blob/be9943408a2e6b697d0f3aada9a17a783ee42c4a/Sources/DodomaCore/SafetyGate.swift">SafetyGate.swift</a> · <a href="https://github.com/alialhawas/Harf/blob/be9943408a2e6b697d0f3aada9a17a783ee42c4a/Sources/DodomaCore/CaretVerification.swift">CaretVerification.swift</a> · <a href="https://github.com/alialhawas/Harf/blob/be9943408a2e6b697d0f3aada9a17a783ee42c4a/Sources/DodomaAppKit/TypingPipeline.swift">TypingPipeline.swift</a> · <a href="https://github.com/alialhawas/Harf/blob/be9943408a2e6b697d0f3aada9a17a783ee42c4a/Sources/DodomaAppKit/FixEngine.swift">FixEngine.swift</a>.</p></section><section id="learning-and-testing" aria-labelledby="learning-and-testing-title"><h2 id="learning-and-testing-title" data-i18n="learnTitle">A smart dictionary that learns your words.</h2>
+<p  data-i18n="dictionaryIntro">Client names, product names, and technical terms are part of daily writing. Harf’s smart dictionary can learn recurring words that the bundled lists miss, then include them in future language scores. It keeps English and Arabic vocabulary separately.</p>
+<figure id="dictionary-demo" class="dictionary-figure" data-learned="false">
+  <div class="demo-label" data-i18n="dictionaryLabel">05 / A dictionary that learns your words</div>
+  <div class="dictionary-flow">
+    <div class="bevel dictionary-observations">
+      <h3  data-i18n="dictionaryObserveTitle">Repeated use</h3>
+      <div class="dictionary-word"><bdi>webhook</bdi><span id="dictionary-count" dir="ltr">1 / 10</span></div>
+      <div id="dictionary-progress" role="progressbar" aria-label="Qualifying observations" data-i18n-aria-label="dictionaryProgress" aria-valuemin="0" aria-valuemax="10" aria-valuenow="1"><span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span></div>
+      <p  data-i18n="dictionaryObservationNote">Each step represents one qualifying observation.</p>
+    </div>
+    <div class="dictionary-wire" aria-hidden="true"></div>
+    <div class="bevel dictionary-entry">
+      <h3  data-i18n="dictionaryEntryTitle">Your dictionary</h3>
+      <div class="dictionary-word"><bdi>webhook</bdi><span id="dictionary-state">Learning</span></div>
+      <p id="dictionary-credit">No dictionary credit yet</p>
+    </div>
+  </div>
+  <div class="dictionary-actions" hidden>
+    <div class="dictionary-stages" role="group" aria-label="Inspect dictionary learning stages" data-i18n-aria-label="dictionaryStages">
+      <button type="button" data-dictionary-count="1" aria-pressed="true" data-i18n="dictionaryOnce">1 observation</button>
+      <button type="button" data-dictionary-count="9" aria-pressed="false" data-i18n="dictionaryNine">9 observations</button>
+      <button type="button" data-dictionary-count="10" aria-pressed="false" data-i18n="dictionaryTen">10 → learned</button>
+    </div>
+    <button type="button" id="dictionary-observe" data-i18n="dictionaryAgain">Observe once more +</button>
+  </div>
+  <p id="dictionary-result" role="status" aria-live="polite">Harf has observed “webhook” once. It remains pending until the tenth qualifying observation.</p>
+  <figcaption  data-i18n="dictionaryDemoCaption">The illustration repeats from 1 to 10 and holds the learned result before restarting. Your real dictionary is unchanged.</figcaption>
+</figure>
+<p  data-i18n="learningDetail">The bundled dictionary is built from subtitles, so it cannot cover every team’s vocabulary. Automatic learning runs only when detection returns “ignore” with no candidate region. It records words of at least three letters that are absent from the bundled list. After <strong>ten qualifying observations</strong>, the word contributes to dictionary coverage in its language. An observation is an event recorded by the learner; ten observations do not necessarily mean ten independently written messages.</p><p  data-i18n="manualLearning">You can add a word directly without waiting for automatic learning. Manual entries can be two letters, such as <code>pr</code> or <code>qa</code>. After a manual layout flip, the card’s <strong>Learn</strong> action adds missing words from the corrected text and clears pending counts for unknown words in the original wrong-layout text. It preserves words the model already recognizes and entries you added yourself. Flipping the layout and choosing to learn are separate actions.</p>
+<h3  data-i18n="dictionaryControlTitle">See and manage your dictionary.</h3>
+<p  data-i18n="dictionaryControlBody">The CLI lists learned words, manually added entries, and words still being counted. You can also add a word immediately or remove one by name:</p>
+<div class="code-block"><div class="code-top"><span  data-i18n="dictionaryListLabel">VIEW ENGLISH VOCABULARY</span></div><pre><code>harf --words list --lang en</code></pre></div>
+<div class="code-block"><div class="code-top"><span  data-i18n="dictionaryAddLabel">ADD A WORD IMMEDIATELY</span></div><pre><code>harf --words add webhook --lang en</code></pre></div>
+<div class="code-block"><div class="code-top"><span  data-i18n="dictionaryRemoveLabel">REMOVE A WORD</span></div><pre><code>harf --words remove webhook --lang en</code></pre></div>
+<p class="small" data-i18n="dictionaryLanguageNote">Use <code>--lang ar</code> for Arabic vocabulary. Removing a word clears its learned count and any manual entry; future qualifying use can start learning it again.</p>
+<p  data-i18n="learningPrivacy">Learned vocabulary is stored locally in <code>~/Library/Application Support/Harf/lexicon.json</code>. Updates replace the file atomically, and its permissions restrict access to its owner. You can inspect or remove the saved words. Turning vocabulary learning off clears the stored lexicon.</p><p class="source-note"  data-i18n="learningSources">Read the implementation: <a href="https://github.com/alialhawas/Harf/blob/be9943408a2e6b697d0f3aada9a17a783ee42c4a/Sources/DodomaCore/UserLexicon.swift">UserLexicon.swift</a> · <a href="https://github.com/alialhawas/Harf/blob/be9943408a2e6b697d0f3aada9a17a783ee42c4a/Sources/DodomaCore/FlipLearning.swift">FlipLearning.swift</a> · <a href="https://github.com/alialhawas/Harf/blob/be9943408a2e6b697d0f3aada9a17a783ee42c4a/Sources/DodomaAppKit/AppDelegate.swift">AppDelegate.swift</a>.</p></section>
+
+      <section id="install" aria-labelledby="install-title">
+        <h2 id="install-title" data-i18n="installTitle">Install Harf.</h2>
+        <div class="code-block"><div class="code-top"><span data-i18n="terminal">TERMINAL</span><button class="copy" type="button" data-copy="install-code" aria-label="Copy installation command" data-i18n-aria-label="copyInstall">Copy</button></div><pre><code id="install-code">brew install harf</code></pre></div>
+      </section>
+      <div class="endnote"><a href="https://github.com/alialhawas/Harf" data-i18n="github">Explore Harf on GitHub <span aria-hidden="true">↗</span></a><a href="#top" data-i18n="backTop">Back to top ↑</a></div>
+    </article>
+  </main>
+  <footer><span data-i18n="footer">Hatif Engineering · Made for life between two languages.</span><a href="harf.html" data-i18n="footerHarf">Meet Harf ↗</a></footer>
+  <script src="assets/harf-article-i18n.js"></script>
+  <script src="assets/harf-dictionary-demo.js"></script>
+  <script>
+    const articleMessages = {
+      en: {
+        title: "From client conversations to code. Why we built Harf.",
+        description: "Between everyday emails, client conversations, and coding, our work moves between Arabic and English. How Harf recovers text typed with the wrong keyboard layout.",
+        stronger: 'stronger reading', weak: 'weak reading', untested: 'not compared',
+        passed: 'passed in this example', checking: 'checking eligibility…', waiting: 'waiting',
+        keyboard: 'Keyboard: {language}', ar: 'Arabic', en: 'English',
+        ready: 'You meant to write {target}. The keyboard was in {source}.',
+        type: 'Watch each key arrive at a steady pace. The text below follows each key.',
+        compare: 'Render both layouts. The {target} reading has stronger language evidence.',
+        check: 'Check app policy, secure fields, and caret text before replacing anything.',
+        fix: 'The checks pass in this example. Replace the text and switch to {target}.',
+        follow: 'Follow a keystroke ○', replay: 'Replay ↻', playing: 'Playing…',
+        copy: 'Copy', copied: 'Copied ✓', selected: 'Selected'
+      },
+      ar: {
+        title: "من مراسلات العملاء إلى كتابة الكود. لماذا بنينا «حرف»؟",
+        description: "بين رسائل البريد اليومية، ومتابعة العملاء والردّ عليهم، ثم العودة إلى كتابة الكود، نتنقّل بين العربية والإنجليزية. كيف يستعيد حرف النص المكتوب بتخطيط لوحة المفاتيح الخطأ.",
+        stronger: 'قراءة أوضح', weak: 'قراءة ضعيفة', untested: 'لم تُقارَن بعد',
+        passed: 'اجتاز الفحص في المثال', checking: 'جارٍ التحقّق…', waiting: 'بانتظار المقارنة',
+        keyboard: 'لغة اللوحة: {language}', ar: 'العربية', en: 'الإنجليزية',
+        ready: 'كنت تقصد الكتابة باللغة {target}، لكن لوحة المفاتيح كانت على {source}.',
+        type: 'تظهر المفاتيح واحدًا تلو الآخر بوتيرة ثابتة. يتحدّث النص في الأسفل مع كل ضغطة.',
+        compare: 'نحوّل المفاتيح إلى نص بالتخطيطين. القراءة باللغة {target} أقرب إلى لغة مفهومة.',
+        check: 'نتحقّق من وضع التطبيق والحقول الآمنة والنص عند المؤشر قبل الاستبدال.',
+        fix: 'اجتاز هذا المثال الفحوص. نستبدل النص ونغيّر لغة اللوحة إلى {target}.',
+        follow: 'تتبّع المفاتيح ○', replay: 'إعادة العرض ↻', playing: 'جارٍ العرض…',
+        copy: 'نسخ', copied: 'تم النسخ ✓', selected: 'تم تحديد النص'
+      }
+    };
+    let articleLocale = 'en';
+    const englishArticle = new Map([...document.querySelectorAll('[data-i18n]')].map(node => [node, node.innerHTML]));
+    function message(key, values = {}) {
+      return articleMessages[articleLocale][key].replace(/\{(\w+)\}/g, (_, name) => values[name] ?? '');
+    }
+    const examples = {
+      ar: { wrong: 'hgsghl ugd;l', right: 'السلام عليكم', before: 'English', after: 'Arabic', source: 'en', keys: 'hgsghl ugd;l' },
+      en: { wrong: 'اثممخ صخقمي', right: 'hello world', before: 'Arabic', after: 'English', source: 'ar', keys: 'hello world' }
+    };
+    const demo = document.querySelector('#correction-demo');
+    const text = document.querySelector('#demo-text');
+    const result = document.querySelector('#demo-result');
+    const layout = document.querySelector('#layout-label');
+    const replay = document.querySelector('#replay');
+    const languageButtons = [...document.querySelectorAll('[data-language]')];
+    const stages = [...document.querySelectorAll('[data-stage]')];
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let language = 'ar';
+    let run = 0;
+    let capturedKeyCount = 0;
+    const captureKeyDelay = () => 650;
+
+    function setText(value, lang) {
+      const span = document.createElement('span');
+      span.textContent = value;
+      span.lang = lang;
+      span.dir = lang === 'ar' ? 'rtl' : 'ltr';
+      text.replaceChildren(span);
+    }
+    function renderCapturedKeys(count) {
+      const example = examples[language];
+      capturedKeyCount = Math.min(count, example.keys.length);
+      demo.dataset.capturedKeys = String(capturedKeyCount);
+      const english = language === 'en' ? example.right : example.wrong;
+      const arabic = language === 'ar' ? example.right : example.wrong;
+      document.querySelector('#english-reading').textContent = [...english].slice(0, capturedKeyCount).join('');
+      document.querySelector('#arabic-reading').textContent = [...arabic].slice(0, capturedKeyCount).join('');
+      document.querySelectorAll('#buffer-keys span').forEach((key, index) => {
+        const pressed = index < capturedKeyCount;
+        const character = example.keys[index];
+        key.textContent = pressed ? (character === ' ' ? '␣' : character.toUpperCase()) : '';
+        key.classList.toggle('captured-key', pressed);
+        key.classList.toggle('current-key', pressed && index === capturedKeyCount - 1 && demo.dataset.step === 'type');
+      });
+      if (demo.dataset.step !== 'fix') setText([...example.wrong].slice(0, capturedKeyCount).join(''), example.source);
+    }
+    function setStage(stage, preserveCapture = false) {
+      const example = examples[language];
+      const compared = ['compare', 'check', 'fix'].includes(stage);
+      const fixed = stage === 'fix';
+      demo.dataset.step = stage;
+      stages.forEach(item => item.classList.toggle('active', item.dataset.stage === stage));
+      document.querySelectorAll('[data-inspect]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.inspect === stage)));
+      document.querySelectorAll('[data-reading]').forEach(node => {
+        const winner = node.dataset.reading === language;
+        node.classList.toggle('winner', compared && winner);
+        node.querySelector('.reading-score b').textContent = message(compared ? (winner ? 'stronger' : 'weak') : 'untested');
+      });
+      document.querySelector('#safety-node').classList.toggle('passed', fixed);
+      document.querySelector('#gate-status').textContent = message(fixed ? 'passed' : stage === 'check' ? 'checking' : 'waiting');
+      const count = stage === 'ready' ? 0 : stage === 'type' ? (preserveCapture ? capturedKeyCount : 0) : example.keys.length;
+      renderCapturedKeys(count);
+      if (fixed) setText(example.right, language);
+      text.classList.toggle('corrected', fixed);
+      layout.textContent = message('keyboard', { language: message(fixed ? language : example.source) });
+      result.textContent = message(stage, { target: message(language), source: message(example.source) });
+    }
+    function resetExample() {
+      run++;
+      const example = examples[language];
+      document.querySelector('#english-reading').textContent = language === 'en' ? example.right : example.wrong;
+      document.querySelector('#arabic-reading').textContent = language === 'ar' ? example.right : example.wrong;
+      document.querySelector('#buffer-keys').replaceChildren(...[...example.keys].map(character => {
+        const key = document.createElement('span');
+        key.textContent = character === ' ' ? '␣' : character.toUpperCase();
+        return key;
+      }));
+      setStage('ready');
+      replay.disabled = false;
+      replay.textContent = message('follow');
+      languageButtons.forEach(button => button.setAttribute('aria-pressed', String(button.dataset.language === language)));
+    }
+    languageButtons.forEach(button => button.addEventListener('click', () => {
+      language = button.dataset.language;
+      resetExample();
+    }));
+    const delay = ms => new Promise(resolve => window.setTimeout(resolve, ms));
+    document.querySelectorAll('[data-inspect]').forEach(button => button.addEventListener('click', () => {
+      run++;
+      setStage(button.dataset.inspect);
+      if (button.dataset.inspect === 'type') renderCapturedKeys(examples[language].keys.length);
+      replay.disabled = false;
+      replay.textContent = message('replay');
+    }));
+    replay.addEventListener('click', async () => {
+      resetExample();
+      const currentRun = run;
+      replay.disabled = true;
+      replay.textContent = message('playing');
+      if (!reducedMotion.matches) {
+        setStage('type');
+        for (let index = 0; index < examples[language].keys.length; index++) {
+          await delay(captureKeyDelay(index));
+          if (currentRun !== run) return;
+          renderCapturedKeys(index + 1);
+        }
+        await delay(900);
+        if (currentRun !== run) return;
+        for (const [stage, duration] of [['compare', 1100], ['check', 900]]) {
+          setStage(stage);
+          await delay(duration);
+          if (currentRun !== run) return;
+        }
+      }
+      setStage('fix');
+      replay.disabled = false;
+      replay.textContent = message('replay');
+    });
+
+    document.querySelectorAll('[data-copy]').forEach(button => {
+      button.addEventListener('click', async () => {
+        const code = document.getElementById(button.dataset.copy);
+        try {
+          await navigator.clipboard.writeText(code.textContent);
+          button.textContent = message('copied');
+        } catch {
+          const range = document.createRange();
+          range.selectNodeContents(code);
+          const selection = window.getSelection();
+          selection.removeAllRanges();
+          selection.addRange(range);
+          button.textContent = message('selected');
+        }
+        window.setTimeout(() => { button.textContent = message('copy'); }, 2000);
+      });
+    });
+
+    const sectionLinks = [...document.querySelectorAll('.toc a')];
+    const sections = sectionLinks.map(link => document.querySelector(link.getAttribute('href')));
+    let scheduled = false;
+    function updateSection() {
+      let active = sections[0];
+      sections.forEach(section => { if (section.getBoundingClientRect().top <= 180) active = section; });
+      sectionLinks.forEach(link => {
+        if (link.hash === `#${active.id}`) link.setAttribute('aria-current', 'location');
+        else link.removeAttribute('aria-current');
+      });
+      scheduled = false;
+    }
+    window.addEventListener('scroll', () => {
+      if (!scheduled) { scheduled = true; window.requestAnimationFrame(updateSection); }
+    }, { passive: true });
+    function setArticleLocale(locale, remember = false) {
+      if (!['en', 'ar'].includes(locale)) return;
+      run++;
+      articleLocale = locale;
+      document.documentElement.lang = locale;
+      document.documentElement.dir = locale === 'ar' ? 'rtl' : 'ltr';
+      englishArticle.forEach((english, node) => {
+        node.innerHTML = locale === 'ar' ? articleArabic[node.dataset.i18n] : english;
+      });
+      for (const attribute of ['aria-label', 'alt']) {
+        document.querySelectorAll(`[data-i18n-${attribute}]`).forEach(node => {
+          const key = node.getAttribute(`data-i18n-${attribute}`);
+          node.setAttribute(attribute, articleAttributes[key][locale === 'ar' ? 1 : 0]);
+        });
+      }
+      document.querySelector('.architecture img').src = locale === 'ar' ? 'assets/harf-architecture.ar.svg' : 'assets/harf-architecture.svg';
+      document.title = message('title');
+      document.querySelector('meta[property="og:title"]').content = message('title');
+      document.querySelector('meta[name="description"]').content = message('description');
+      document.querySelector('meta[property="og:description"]').content = message('description');
+      document.querySelectorAll('[data-locale]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.locale === locale)));
+      document.querySelectorAll('[data-copy]').forEach(button => { button.textContent = message('copy'); });
+      renderDictionaryDemo(locale);
+      setStage(demo.dataset.step, true);
+      replay.disabled = false;
+      replay.textContent = message(demo.dataset.step === 'ready' ? 'follow' : 'replay');
+      if (remember) {
+        try { localStorage.setItem('hatif.harf.articleLanguage', locale); } catch {}
+        try {
+          const url = new URL(location.href);
+          url.searchParams.set('lang', locale);
+          history.replaceState(null, '', url);
+        } catch {}
+      }
+      window.harfAnimations?.refresh();
+      window.harfArchitecture?.refresh();
+      updateSection();
+    }
+    document.querySelectorAll('[data-locale]').forEach(button => button.addEventListener('click', () => setArticleLocale(button.dataset.locale, true)));
+    let initialLocale = 'en';
+    try {
+      const saved = localStorage.getItem('hatif.harf.articleLanguage');
+      if (['en', 'ar'].includes(saved)) initialLocale = saved;
+    } catch {}
+    const requestedLocale = new URL(location.href).searchParams.get('lang');
+    if (['en', 'ar'].includes(requestedLocale)) initialLocale = requestedLocale;
+    setArticleLocale(initialLocale);
+    document.querySelector('.article-language').hidden = false;
+    document.querySelector('.dictionary-actions').hidden = false;
+    updateSection();
+  </script>
+  <script src="assets/harf-diagram-animation.js"></script>
+  <script src="assets/harf-architecture-flow.js"></script>
+</body>
+</html>

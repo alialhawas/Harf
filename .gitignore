@@ -8,3 +8,8 @@ build/
 Tools/data/
 __pycache__/
 .gstack/
+
+# Suisse Intl is a commercial typeface. Its licence covers use, not
+# redistribution of the font software, so the article loads it locally and the
+# repository ships without it; --heading falls back to the stack in --sans.
+docs/assets/fonts/SuisseIntl-*.otf
