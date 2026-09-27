@@ -14,5 +14,5 @@ public enum Dodoma {
     ///
     /// The literal is kept honest by `VersionTests`, which parses
     /// `Resources/Info.plist` and fails if the two ever drift. Bump both.
-    public static let version = "1.0.0"
+    public static let version = "1.0.1"
 }

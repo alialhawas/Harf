@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 650" lang="ar" role="img" aria-labelledby="title description">
+  <title id="title">بنية نظام حرف</title>
+  <desc id="description">تنتقل ضغطات المفاتيح من التطبيق الحالي إلى الالتقاط والذاكرة المؤقتة والمقارنة بين التخطيطين العربي والإنجليزي. يجب اجتياز فحص الأمان قبل استبدال النص في التطبيق الأصلي. كل المكوّنات تعمل محليًا على جهازك.</desc>
+  <style>
+    text{font-family:SFMono-Regular,Consolas,monospace;font-size:19px;font-weight:600;fill:#e6e6e1}
+    .slab path{stroke:#787a73;stroke-width:1;stroke-linejoin:miter}
+    .face{fill:#242424}.side{fill:#191919}.front{fill:#1c1c1c}
+    .yellow path{stroke:#94d5cb}.yellow .face{fill:#21473d}.yellow .side,.yellow .front{fill:#142d27}
+    .blue path{stroke:#b0a5f5}.blue .face{fill:#31264d}.blue .side,.blue .front{fill:#211a35}
+    .sub{font-size:12px;fill:#aaa;font-weight:400}.plane{fill:none;stroke:#4b4d4a;stroke-width:1}
+    .wire{fill:none;stroke:#64655e;stroke-width:1;stroke-dasharray:4 6}
+    .model-wire{stroke:#7160df}.label{font-size:12px;font-weight:400;fill:#a6a7a0;letter-spacing:1px}
+    .tag{font-size:11px;font-weight:400;fill:#878981}
+  text{font-family:Tahoma,Arial,sans-serif;direction:rtl;text-anchor:end;letter-spacing:0}.slab text{text-anchor:middle}.label{font-size:13px}.tag{font-size:12px}
+  </style>
+  <defs><marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M1 1L7 4L1 7" fill="none" stroke="#85877f"/></marker></defs>
+  <path class="plane" d="M115 222L194 177L887 260L808 306Z" opacity=".6"/>
+  <path class="wire" d="M489 123V154H246V202" marker-end="url(#arrow)"/>
+  <path class="wire" d="M338 238H401" marker-end="url(#arrow)"/>
+  <path class="wire" d="M588 238H651" marker-end="url(#arrow)"/>
+  <path class="wire model-wire" d="M230 425V342H726V298" marker-end="url(#arrow)"/>
+  <path class="wire model-wire" d="M455 425V365H750V300" marker-end="url(#arrow)"/>
+  <path class="wire" d="M848 268H893V463H864" marker-end="url(#arrow)"/>
+  <path class="wire" d="M757 481V509" marker-end="url(#arrow)"/>
+  <path class="wire" d="M855 562H941V77H610" marker-end="url(#arrow)"/>
+  <text class="label" x="310" y="146">آخر ضغطات المفاتيح</text>
+  <text class="label" x="285" y="403">قراءتان للمفاتيح نفسها</text>
+  <text class="tag" x="822" y="389">مسموح؟</text>
+  <text class="tag" x="800" y="505">نعم</text>
+  <text class="label" x="958" y="210" transform="rotate(90 958 210)">العودة إلى التطبيق الحالي</text>
+  <g class="slab neutral">
+    <path class="side" d="M619.1,112.3 L562.8,144.8 L562.8,158.8 L619.1,126.3Z"/>
+    <path class="front" d="M562.8,144.8 L380.9,39.8 L380.9,53.8 L562.8,158.8Z"/>
+    <path class="face" d="M437.2,7.3 L619.1,112.3 L562.8,144.8 L380.9,39.8Z"/>
+    <g transform="matrix(.866 .5 -.866 .5 437.2 7.3)"><text x="105" y="37.5" text-anchor="middle">التطبيق</text></g>
+  </g>
+  <g class="slab neutral">
+    <path class="side" d="M341.8,260.0 L288.1,291.0 L288.1,305.0 L341.8,274.0Z"/>
+    <path class="front" d="M288.1,291.0 L158.2,216.0 L158.2,230.0 L288.1,305.0Z"/>
+    <path class="face" d="M211.9,185.0 L341.8,260.0 L288.1,291.0 L158.2,216.0Z"/>
+    <g transform="matrix(.866 .5 -.866 .5 211.9 185.0)"><text x="75" y="36" text-anchor="middle">الالتقاط</text></g>
+  </g>
+  <g class="slab neutral">
+    <path class="side" d="M591.8,260.0 L538.1,291.0 L538.1,305.0 L591.8,274.0Z"/>
+    <path class="front" d="M538.1,291.0 L408.2,216.0 L408.2,230.0 L538.1,305.0Z"/>
+    <path class="face" d="M461.9,185.0 L591.8,260.0 L538.1,291.0 L408.2,216.0Z"/>
+    <g transform="matrix(.866 .5 -.866 .5 461.9 185.0)"><text x="75" y="36" text-anchor="middle">ذاكرة مؤقتة</text><text class="sub" x="75" y="55" text-anchor="middle">توقّف لمدة ثانية</text></g>
+  </g>
+  <g class="slab yellow">
+    <path class="side" d="M844.0,261.3 L790.3,292.3 L790.3,306.3 L844.0,275.3Z"/>
+    <path class="front" d="M790.3,292.3 L656.0,214.8 L656.0,228.8 L790.3,306.3Z"/>
+    <path class="face" d="M709.7,183.8 L844.0,261.3 L790.3,292.3 L656.0,214.8Z"/>
+    <g transform="matrix(.866 .5 -.866 .5 709.7 183.8)"><text x="77.5" y="36" text-anchor="middle">المقارنة</text></g>
+  </g>
+  <g class="slab blue">
+    <path class="side" d="M335.0,481.3 L271.8,517.8 L271.8,531.8 L335.0,495.3Z"/>
+    <path class="front" d="M271.8,517.8 L135.0,438.8 L135.0,452.8 L271.8,531.8Z"/>
+    <path class="face" d="M198.2,402.3 L335.0,481.3 L271.8,517.8 L135.0,438.8Z"/>
+    <g transform="matrix(.866 .5 -.866 .5 198.2 402.3)"><text x="79" y="41.5" text-anchor="middle">الإنجليزية</text></g>
+  </g>
+  <g class="slab blue">
+    <path class="side" d="M558.0,481.3 L494.8,517.8 L494.8,531.8 L558.0,495.3Z"/>
+    <path class="front" d="M494.8,517.8 L358.0,438.8 L358.0,452.8 L494.8,531.8Z"/>
+    <path class="face" d="M421.2,402.3 L558.0,481.3 L494.8,517.8 L358.0,438.8Z"/>
+    <g transform="matrix(.866 .5 -.866 .5 421.2 402.3)"><text x="79" y="41.5" text-anchor="middle">العربية</text></g>
+  </g>
+  <g class="slab yellow">
+    <path class="side" d="M858.9,463.0 L798.3,498.0 L798.3,512.0 L858.9,477.0Z"/>
+    <path class="front" d="M798.3,498.0 L651.1,413.0 L651.1,427.0 L798.3,512.0Z"/>
+    <path class="face" d="M711.7,378.0 L858.9,463.0 L798.3,498.0 L651.1,413.0Z"/>
+    <g transform="matrix(.866 .5 -.866 .5 711.7 378.0)"><text x="85" y="40" text-anchor="middle">فحص الأمان</text></g>
+  </g>
+  <g class="slab neutral">
+    <path class="side" d="M858.9,591.0 L805.2,622.0 L805.2,636.0 L858.9,605.0Z"/>
+    <path class="front" d="M805.2,622.0 L651.1,533.0 L651.1,547.0 L805.2,636.0Z"/>
+    <path class="face" d="M704.8,502.0 L858.9,591.0 L805.2,622.0 L651.1,533.0Z"/>
+    <g transform="matrix(.866 .5 -.866 .5 704.8 502.0)"><text x="89" y="36" text-anchor="middle">استبدال النص</text></g>
+  </g>
+  <text class="tag" x="130" y="560">بيانات تخطيط لوحة المفاتيح</text>
+  <text class="tag" x="130" y="579">+ القواميس وأنماط الحروف</text>
+  <path class="plane" d="M110 604H610"/>
+  <text class="label" x="110" y="627">على جهازك · دون اتصال بالسحابة</text>
+</svg>
