@@ -2,10 +2,19 @@ cask "harf" do
   version "1.0.1"
   sha256 "35d3bf35b3612855bb56a55d9dcdec0d7d5562ab551ee3478875d98957d9b955"
 
-  url "https://github.com/alialhawas/Language-changer/releases/download/v#{version}/Harf-#{version}.dmg"
+  url "https://github.com/alialhawas/Harf/releases/download/v#{version}/Harf-#{version}.dmg"
   name "Harf"
   desc "Fixes text typed with the wrong keyboard layout, Arabic and English"
-  homepage "https://github.com/alialhawas/Language-changer"
+  homepage "https://github.com/alialhawas/Harf"
+
+  # Without this `brew outdated` has nothing to compare against: a cask with no
+  # livecheck is only as current as the last time someone edited this file by
+  # hand. `:github_latest` reads the newest release of the repository `url`
+  # already points at, which is the same place `scripts/release.sh` publishes.
+  livecheck do
+    url :url
+    strategy :github_latest
+  end
 
   depends_on macos: :sonoma
 
