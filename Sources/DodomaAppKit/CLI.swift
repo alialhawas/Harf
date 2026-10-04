@@ -17,6 +17,8 @@ public enum CLI {
         case policy(bundleID: String?, mode: String?)
         case skipVerify(bundleID: String?, state: String?)
         case unknown(argument: String)
+        /// The only command that can open a socket, and only when typed.
+        case update(checkOnly: Bool)
         case words(action: String?, word: String?, language: String?)
         case quit
         case help
@@ -64,6 +66,11 @@ public enum CLI {
           --config                     the same thing as JSON, for scripts and diffs
           --quit                       stop the running copy, letting it save the
                                        words it learned on the way out
+          --update [--check-only]      ask GitHub whether a newer release exists.
+                                       A Homebrew install is then upgraded with
+                                       brew; anything else is told where the
+                                       release is and left alone. --check-only
+                                       reports and stops
           --set KEY VALUE              change one setting; keys and values below
           --words [list|add|remove|clear] [WORD] --lang en|ar
                                        your own vocabulary, kept in
@@ -84,6 +91,14 @@ public enum CLI {
           into the vocabulary it is already using — so a word added here counts
           on the next keystroke, and the words it has learned this session are
           not lost to the merge. Nothing has to be quit first.
+
+          --update, and the "Check for Updates…" item in the menu, are the
+          only network request Harf makes. There is no timer, no launch check and
+          no setting that turns one on: nothing is asked of GitHub unless you ask
+          for it here. Harf never downloads or replaces itself — on a Homebrew
+          install it runs brew, which verifies the download against the sha256 in
+          the tap you already trusted; anywhere else it prints the release page
+          and the four steps.
 
           --status reports the copy that is running, not this terminal: its
           permissions, the settings it is actually enforcing, and the same status
@@ -222,6 +237,12 @@ public enum CLI {
                     language: value(after: "--lang"))
             case "--quit":
                 return .quit
+            case "--update":
+                // `--check-only` is a modifier on this command and means nothing
+                // without it, so it is read from anywhere in the line rather
+                // than being a command of its own. On its own it falls through
+                // to the typo net below, which is what it is.
+                return .update(checkOnly: arguments.contains("--check-only"))
             case "--help", "-h":
                 return .help
             default:
@@ -377,6 +398,8 @@ public enum CLI {
             return writing { CLIConfig.skipVerify(bundleID, state, store: $0) }
         case .unknown(let argument):
             return fail("unknown option '\(argument)'. Run harf --help for the full list.", code: 2)
+        case .update(let checkOnly):
+            return CLIUpdate.run(checkOnly: checkOnly)
         case .words(let action, let word, let language):
             return CLIConfig.words(action, word, language: language, lexicon: sharedLexicon())
         case .quit:

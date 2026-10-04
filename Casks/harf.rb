@@ -42,6 +42,15 @@ cask "harf" do
     That keeps Gatekeeper on for everything else. Do not install this with
     --no-quarantine unless you understand what you are switching off.
 
+    To upgrade it later:
+
+      brew upgrade --cask alialhawas/harf/harf
+
+    That quits the running copy first, which it has to: Harf holds a keyboard
+    event tap, and replacing the bundle underneath it would leave it tapping
+    the keyboard with no app behind it. `harf --update` checks whether there
+    is anything to install and then runs the same command.
+
     Harf then needs two permissions, both under Privacy & Security:
 
       Accessibility      — to replace the text
